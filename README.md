@@ -4,11 +4,11 @@ Discovery for content-addressed MAD definitions without a curated site.
 
 The maintainer's objective, in his words: "nobody needs to make protocol reference sites like openhaven or any other protocol aggregation site."
 
-In MAD a protocol is a set of definitions (models, authorizations and responsibilities), each identified by a SAID, a digest of its own content. Parties publish frozen definitions, and their publications of them, as static files on an origin they control. Anyone can then ask "who else publishes, or refers to, this SAID" in two ways: by walking introductions outward from one source they already know, or from a catalog that is a repeatable build over public inputs and that anyone can regenerate.
+In MAD a protocol is a set of definitions (models, authorizations and responsibilities), each identified by a SAID, a digest of its own content. Parties serve frozen definitions, and publications that describe them, as static files at an address they control. Anyone can then ask "who else serves, describes or refers to this SAID" in two ways: by walking introductions outward from one source they already know, or from a catalog that is a repeatable build over public inputs and that anyone can regenerate.
 
 ## Status
 
-A design draft awaiting the maintainer's review. There is no code and nothing is deployed.
+A design draft awaiting the maintainer's review: the second draft, revised after an adversarial review of the first. There is no code and nothing is deployed.
 
 ## Rulings
 
@@ -23,6 +23,7 @@ The maintainer's decisions, newest last. Each is the close reason of a `Rule:` b
 - [docs/design.md](docs/design.md): the design. Design authority once approved.
 - [docs/research/spec-review.md](docs/research/spec-review.md): the review of the draft build spec that led to rulings 2 and 3. Six lenses, each re-checked by a skeptic; 108 findings, none refuted.
 - [docs/research/discovery-survey.md](docs/research/discovery-survey.md): the survey of eight families of discovery mechanisms that led to ruling 3.
+- [docs/research/design-review.md](docs/research/design-review.md): the review of the design's first draft. Six lenses, each re-checked by a skeptic; 95 findings, none refuted. It includes the measurement of the candidate finders against live data.
 
 The draft build spec itself is the repository's first commit: `git show 713a12f:MAD-DISCOVERY-SPEC.md`.
 
