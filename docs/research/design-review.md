@@ -21614,3 +21614,103 @@ Severity: should-fix.
 - .
 
 **Proposed change.** In 'Fetching safely' add a limit: 'Definitions fetched from one source: 50 in a walk, 2,000 in a catalog build (numbers for the maintainer to set), taken in SAID order so the cut is the same on every run. A source over the limit is reported with the count left unfetched.' In The catalog, step 3, change 'For every definition a source serves' to 'For each definition a source serves, up to the limit in Fetching safely'. Keep a cap on sources in a catalog build (see the verdict on buildability-13).
+
+## Check of the second draft
+
+The second draft (commit `c7b4bad`) was then checked by five read-only agents: one for internal consistency, three for whether each must-fix and should-fix finding above was carried into the draft, and one for whether every number and outside fact matches this record. They reported 74 items, several of them the same defect seen from two sides. All were applied to the design except where a note below says otherwise. Only the titles are kept here.
+
+### Internal consistency
+
+- (must-fix) The catalog command cannot do what three other sections say it does
+- (must-fix) An unserved SAID does not show in any row, though the design says it does
+- (should-fix) Step 4 has two readings when a `#` sits beside the SAID, and they give different verdicts
+- (should-fix) 'Why step 4' credits step 4 with what step 1 does
+- (should-fix) The test list puts pretty-printed copies under Passing and under Failing
+- (should-fix) A definition's outcomes and an address's outcomes are two lists that disagree, and several stated endings have no outcome
+- (should-fix) A build whose only sources ended `truncated` is treated as empty
+- (should-fix) A row is defined as the walk's report, which leaves three members and all failures to guesswork
+- (should-fix) A build can write a row file larger than a walk will read
+- (should-fix) `--catalog` names a limit, a `via` and a notice that the rest of the design does not define
+- (should-fix) Things the text says are counted, named or reported have no place in the report or the catalog
+- (should-fix) Trust says a fetch time is kept beside every entry; nothing keeps one
+- (should-fix) 'The SAID is the only digest this project writes' is contradicted by `sources.json`
+- (should-fix) The page link rule forbids links that two other sentences require, and one of those links has no target
+- (should-fix) 'About 5,500 definitions per source' ignores the limits on definitions fetched
+- (should-fix) The order of one source's own introductions is not given, though a limit cuts by it
+- (should-fix) The limits table, read as written, forbids the scan the robots finder needs
+- (should-fix) Acceptance clause 1 cannot be run as typed, and the test opt-in does not cover the address rule
+- (should-fix) Acceptance clause 3 mixes up the crawl interval and the delay
+- (should-fix) 'Origin' is used with a second meaning
+- (should-fix) 'Nine adopters' drops its denominator and clashes with two other figures in the design
+- (should-fix) `build` does not say what happens when a named SAID is not in the input folder
+- (consider) `get` is given the walk's failure rule, but it has no unresolved list, no report shape and a different depth
+- (consider) Build order steps 0 and 5 do not say which two sources clause 3 means
+- (consider) The catalog's file list has no stylesheet, though its pages need one and Deploy refuses unlisted files
+- (consider) 'Operator' and 'builder' are used throughout and are not in Terms
+- (consider) 'The two give the same answer' holds only for the compact bytes
+- (consider) The walk test expects a cycle to appear in `unresolved`
+- (consider) The '1 MB description' test cannot reach the publication limit
+- (consider) 'Two dependencies' leaves out the one that `tsc` needs
+- (consider) 'A named commit' of the AI Catalog specification is never named
+
+### Coverage of the authority and SAID-check findings
+
+- (should-fix) Step 4 of the byte check has two readings that accept different files, and no listed test tells them apart
+- (should-fix) "Why step 4" credits step 4 with a refusal that step 1 makes, cites a measurement of the first draft's rule, and understates the cost
+- (should-fix) The failing vectors do not test the octet rule or the direction of step 4
+- (should-fix) The comparison with bpm-core's said.py is false for pretty-printed bytes and silent on a misplaced SAID
+- (should-fix) "The SAID is the only digest this project writes" contradicts the hex Blake3 digest in sources.json
+- (consider) An introduction whose `for` turns out false is reported nowhere, and the omission is not listed as a default
+
+### Coverage of the finders and security findings
+
+- (must-fix) One party can keep a catalog build from ever finishing; the rule that bounded a build's length was dropped
+- (must-fix) Reporting `paths` makes the walk and the catalog build parse strangers' definitions with no depth limit and no bound on what is written
+- (should-fix) Nothing bounds what one source adds to a catalog row, so one source can make a row too large for the walk to read
+- (should-fix) The connection check is skipped when Node is told to use the environment's proxy, because the design no longer requires the routine's own agent
+- (should-fix) The refused-address list was turned from ranges into words and lost three IPv4 ranges
+- (should-fix) The page link rule forbids the cross-site links that the pages and acceptance clause 4 require
+- (should-fix) "Already captures" must be "captures with status 200", and "one request to the crawl's index" is not what the review measured
+- (should-fix) `get` is not held to the walk's rule that a SAID is never sent to a source that does not list it
+- (should-fix) The sentence finders-01 named still says the catalog covers strangers, without the reach
+- (consider) "The walk's limit" for a catalog row names no row of the limits table
+- (consider) The same-origin rule covers a source's pages but not a catalog's, which carry more strangers' text
+
+### Coverage of the objective and buildability findings
+
+- (should-fix) `catalog build` cannot name crawls, has nowhere to keep a scanned crawl's candidate list, and the job's Find stage has no command
+- (should-fix) A catalog row inherits `unresolved`, `catalogs` and `reached` from the walk's report, with no meaning given for them in a row
+- (should-fix) The `unresolved` entry has no member for the limit, the redirect target or the definition concerned
+- (should-fix) The Trust section says a fetch time is kept beside every entry, and no entry has one
+- (should-fix) The link rule and the Pages test forbid the cross-source links the pages are specified to carry
+- (should-fix) "Any static host works" is still claimed, against open question 4 and the fetch rules
+- (should-fix) The test opt-in relaxes the fetch routine but not the address rule, so the local-server tests cannot pass as written
+- (should-fix) `get` exits 0 when it did not get the definition asked for, and its output has no shape
+- (should-fix) No test covers `get`
+- (consider) "The SAID is the only digest this project writes" contradicts the digest in `sources.json`
+- (consider) `catalog.json` records the tool's commit, and nothing says where the tool gets it
+
+### Facts and numbers
+
+- (should-fix) "Why step 4" credits step 4 with a refusal that step 1 makes, and cites a measurement taken against the first draft's rule
+- (should-fix) "Nine adopters" is a count from one probe of a sample, and the design gives 200 to 250 for the same analog elsewhere
+- (should-fix) Only a self-addressing KERI identifier matches the SAID pattern
+- (should-fix) "any static host works" is the overclaim the review corrected, and line 577 contradicts it
+- (should-fix) The 5,500 definitions per source figure is above the 2,000 a catalog build will fetch
+- (should-fix) The measurement scripts were not kept
+- (should-fix) "A named commit" of the AI Catalog specification is named nowhere
+- (consider) The SAID is not the only digest the project writes
+- (consider) The dependency count leaves out TypeScript
+- (consider) "One request to the crawl's index" leaves out that the hosted index failed when measured, and that only a status 200 capture qualifies
+- (consider) "Refuse Common Crawl" reads as including hosts that disallow CCBot, which are still archived
+- (consider) The DNS TXT entry drops half of the skeptic's corrected coverage
+- (consider) The measurement date is UTC and reads as tomorrow in local time
+- (consider) Open question 3 calls the definition path KERI's convention; the survey found the path unsettled
+- (consider) The comparison with said.py holds only for compact bytes
+
+Not applied as proposed:
+
+- The catalog commands. The checkers proposed a candidates folder or a scans folder; the design uses `catalog find` writing one file per snapshot and `catalog build --candidates <file>`, and takes the candidates of three crawls together instead of the newest capture per host, which needs no record of hosts that were captured without the line.
+- The length of a catalog build. The checker proposed lower numbers and a per-address caveat; the design makes the time and byte limits per host instead of per source, drops the per-address count, and states the bound.
+- The CloudFront setting. The design removes it instead of rewording it: every link and every fetched address names a file, so no folder-to-index mapping is needed.
+- The size of the sample a walk takes from a flooded catalog row. Two checkers disagreed; the design uses the limit on sources per run, not the limit on introductions from one source, because a catalog exists to name more sources than one introducer would.
