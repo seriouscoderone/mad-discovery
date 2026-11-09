@@ -1,10 +1,10 @@
 # mad-discovery design
 
-**Status: draft for the maintainer's review.** Nothing here is built. It replaces the draft build spec (`git show 713a12f:MAD-DISCOVERY-SPEC.md`) and is written to the three rulings in the [README](../README.md#rulings).
+**Status: approved by the maintainer on 2026-11-09, with the changes from its stress test written in.** Nothing here is built yet. It replaces the draft build spec (`git show 713a12f:MAD-DISCOVERY-SPEC.md`) and is written to the rulings in the [README](../README.md#rulings).
 
-This is the second draft. The first was put through an adversarial review: six reviewers with different lenses, each rechecked by a skeptic, 95 findings, none refuted. That review is in [research/design-review.md](research/design-review.md). The evidence behind the rulings is in [research/spec-review.md](research/spec-review.md) and [research/discovery-survey.md](research/discovery-survey.md).
+How it got here: a first draft went through an adversarial review (six lenses, each rechecked by a skeptic; 95 findings, none refuted), a second draft through a consistency check (74 items), and the result through a stress test with the maintainer (nine branches, five of which changed the design). The review is in [research/design-review.md](research/design-review.md), and the stress test's outcome is at the end of this document. The evidence behind the rulings is in [research/spec-review.md](research/spec-review.md) and [research/discovery-survey.md](research/discovery-survey.md).
 
-The decisions that are the maintainer's to make are collected in [Open questions](#open-questions-for-the-maintainer). Smaller choices this draft made on its own are listed in [Defaults chosen here](#defaults-chosen-here). Everything between is the specification.
+[Decisions made at review](#decisions-made-at-review) records what the maintainer decided. [Defaults chosen here](#defaults-chosen-here) lists the smaller choices. Everything between is the specification.
 
 ## What this project is for
 
@@ -15,19 +15,19 @@ In MAD a protocol is a set of definitions: models, authorizations and responsibi
 | What a reference site gives | What supplies it here | Who can use it |
 |---|---|---|
 | Somewhere to read a definition | A page per definition on each source | A person |
-| Who else uses it | The walk, and a catalog's row for the SAID | A program. A person too, if catalogs carry pages (open question 2) |
+| Who else uses it | The walk, and a catalog's row for the SAID | A program through the row; a person through the catalog's page |
 | A list of what exists | Each source's index page, and a catalog's index | A person, per source. Across sources, as above |
 | What replaced what | Only when the newer definition's bytes name the older SAID (see [Lineage](#lineage)) | A program |
 | Browsing by topic, searching by a business term | Not in this cut (bpm-nq3.7, bpm-upm.22) | |
-| Independent assessment | Not in this cut. It waits for signatures | |
+| Independent assessment | Not this project's job. The web is where ideas are offered and found; judging them happens elsewhere | |
 
-**What it promises.** No hand-curation, no submission step and no authoritative site. A directory of definitions becomes a mechanical view that anyone can rebuild and nobody owns.
+**What it promises.** No hand-curation, no submission step and no authoritative site. Posting is open: anyone with an address can offer definitions, and no build leaves a source out. A directory of definitions becomes a mechanical view that anyone can rebuild and nobody owns.
 
 **What it does not promise.**
 
 - That no index exists anywhere. Asking "who else uses this SAID" of parties you have no link to needs a list that somebody compiled. The survey found no exception across eight families of mechanisms. This design keeps that list rebuildable, replaceable and without authority.
 - That a catalog lists every source. No public input measured lists a brand-new website that nobody has linked to, by a route that is free, repeatable and not one company's search. The finder built first reaches websites that Common Crawl already captures. Everyone else is found through introductions. See [Finding sources nobody linked](#finding-sources-nobody-linked).
-- Independent assessment. Much of what openhaven.net offers is its researchers' judgement of each protocol, and it refuses self-description. Replacing that needs statements about a SAID signed by third parties, which waits for signatures (see [Trust](#trust-what-is-verified-claimed-and-unresolved)).
+- Independent assessment. Much of what openhaven.net offers is its researchers' judgement of each protocol. This project offers ideas and says who offers them, when the offerer says so. What to make of an idea is the reader's business, decided with whatever tools they trust (see [Trust](#trust-what-is-verified-claimed-and-unresolved)).
 - That parties will run sources. The source document, the robots line and the publication record are new and have no adopters. The survey's closest analog, ARD and AI Catalog, had nine publishers among roughly 38,000 domains probed after about five months, and roughly 200 to 250 worldwide.
 
 ## Terms
@@ -39,21 +39,21 @@ These are MAD's own words for discovery, from `mad/docs/mad-ux-design.md` ("Expl
 | Definition | A frozen document identified by its SAID. For MAD: a model, an authorization or a responsibility (Ruling 2). The tool never reads a document's kind. In the test data: gym-bp's frozen documents, three of which are selections. |
 | SAID | The definition's identifier: the Blake3-256 digest of its content in CESR text form. Exactly 44 characters: `E`, then one of `A` to `P`, then 42 of `A-Z a-z 0-9 - _`. The workspace's rule; this project identifies definitions by no other digest. |
 | Source | A place on the web that serves definitions and records about them as static files. It is identified by the address of its source document. |
-| Source document | One JSON file that says what a source serves, which publications it carries and which other sources it knows. |
+| Source document | One JSON file that says what a source serves, which publications it carries, which other sources it knows and, when the operator says so, who runs it. |
 | Serve | To make a definition's bytes fetchable at a source. bpm-core's vocabulary calls this *publish*. Here a publication is the record about a definition, and serving alone is what a mirror does. |
-| Publication | MAD's word for a principal's endorsement of one exact definition, with its discovery metadata: a name, a description, tags and a collection placement. In this cut the record names no principal and is unsigned, so it is a description found at a source address, not an endorsement anyone can be held to. |
+| Publication | An offering: one exact definition put forward for others to find and reuse, with a name, a description, tags, a collection placement and, when stated, who offers it. MAD's word for the record. Here it is not an endorsement, and nothing about it is verified. |
 | Introduction | A pointer to another source's address, with the SAIDs to look for there when known. The reader fetches and checks; an introduction is a hint, never a fact. It follows KERI's out-of-band introduction. |
 | Catalog | A listing derived from sources: for each SAID, which source addresses serve it, which carry a publication of it and which definitions contain it. Any number can exist and none is authoritative. |
 | Finder | The part of a catalog build that proposes source addresses from a public input. |
 | Reader | Whoever runs a lookup. |
 | Operator | The party that builds a source and serves it at an address it controls. |
 | Builder | Whoever runs a catalog build. |
-| Principal | A person or organization identified by a key it holds itself. MAD's word. Nothing here identifies principals until publications are signed. |
+| AID | A KERI identifier. A source or a publication may state one as who runs it or who offers a definition. Stated, never verified here. |
 | Origin | A scheme, host and port, such as `https://gym.example`. |
 
 A protocol is a set of definitions. Where the set is itself a frozen document, as a gym-bp selection is, its page is the protocol's page: it lists the members and links to each. A MAD assembly has no SAID; whether assemblies or selections get one is the unmade ruling bpm-nq3.6.
 
-Two words from earlier discussion are gone. "Declaration" already means something else in MAD (a responsibility's state and view declarations), so the records here are publications and introductions. And nothing claims authorship: identity comes from content, so there is no author to record.
+Two words from earlier discussion are gone. "Declaration" already means something else in MAD (a responsibility's state and view declarations), so the records here are publications and introductions. And nothing proves authorship: identity comes from content, and who offers a definition is stated, not proved.
 
 ## The three parts
 
@@ -67,23 +67,26 @@ It is one TypeScript package with a command-line tool. There is no server, datab
 
 ## A source
 
-A source is the output folder of one build. Every path is fixed and relative to the source's *base*, which is the address of the source document without its last three segments. For a source at the root of `gym.example` the base is `https://gym.example/`.
+A source is one folder of static files. Its address is the address of its source document, `source.json`, and every other file sits beside it at a fixed path. The *base* is the address with `source.json` removed: for `https://gym.example/mad/source.json` the base is `https://gym.example/mad/`. An operator puts the folder wherever they like: at the root of a host, under a path, on any static host.
 
 ```
-.well-known/mad/source.json              the source document
-.well-known/oobi/<SAID>/index.json       the bytes of the definition with that SAID
-pages/index.html                         a page listing what this source serves
-pages/<SAID>/index.html                  the readable page for that definition
-pages/style.css                          the one stylesheet
-sitemap.xml                              lists every page
-.well-known/ai-catalog.json              AI Catalog entries; only at the root of a host
+source.json                  the source document; its address is the source's address
+definitions/<SAID>.json      the bytes of the definition with that SAID
+pages/index.html             a page listing what this source serves
+pages/<SAID>/index.html      the readable page for that definition
+pages/style.css              the one stylesheet
+sitemap.xml                  lists every page
 ```
+
+When the folder is the root of a host, the build also writes `/.well-known/ai-catalog.json` (see [AI Catalog entries](#ai-catalog-entries)).
 
 The source document:
 
 ```json
 {
-  "source": "https://gym.example/.well-known/mad/source.json",
+  "source": "https://gym.example/mad/source.json",
+  "by": "EKxy...the AID of whoever runs this source",
+  "oobi": "https://gym.example/oobi/EKxy...",
   "pages": true,
   "serves": [
     {
@@ -106,7 +109,7 @@ The source document:
   ],
   "introductions": [
     {
-      "source": "https://city.example/.well-known/mad/source.json",
+      "source": "https://city.example/mad/source.json",
       "for": ["EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL"]
     }
   ],
@@ -117,6 +120,8 @@ The source document:
 | Member | Type | Required | Rule |
 |---|---|---|---|
 | `source` | source address | yes | Must equal the address the document was fetched from. |
+| `by` | AID | no | Who runs this source, stated by the operator. Nothing here verifies it. |
+| `oobi` | `https` address | no | Where that AID can be resolved: the KERI `(url, aid)` pair. The tool stores and shows it and fetches nothing from it. |
 | `pages` | boolean | no, default false | True when the source has the readable pages at the paths above. |
 | `serves` | array of `{ said, refers }` | no, default empty | `said` is a SAID. `refers` is an array of SAIDs, default empty. |
 | `publications` | array | no, default empty | See [Publications](#publications). |
@@ -125,21 +130,21 @@ The source document:
 
 Rules for a source:
 
-- **A source is identified by the address of its source document**, not by a domain. A source can live under a path on a shared host. The domain is a locator, never an identity.
-- **A source address has one form.** It is `https` on the default port, with a DNS host name (no IP literal, no trailing dot), no user name, password, query or fragment, a path ending in `/.well-known/mad/source.json`, and at most 512 characters. The address is the string the WHATWG URL parser serializes; that string is what is fetched, compared, stored and shown. A catalog address follows the same rule except that its path ends in `/catalog.json`.
+- **A source is identified by the address of its source document**, not by a domain and not by an AID. A source can live under a path on a shared host. The domain is a locator, never an identity; an AID, when stated, is attribution, never identity.
+- **A source address has one form.** It is `https` on the default port, with a DNS host name (no IP literal, no trailing dot), no user name, password, query or fragment, a path ending in `/source.json`, and at most 512 characters. The address is the string the WHATWG URL parser serializes; that string is what is fetched, compared, stored and shown. A catalog address follows the same rule except that its path ends in `/catalog.json`.
 - **`source` must equal the address the document was fetched from.** A document that names another address is a copy of someone else's files. The reader lists it as unresolved and reads nothing from it. Copying a source's files therefore does not make a second source; rebuilding them for a new address does, and that is an intentional act.
-- **A definition's address is derived, never declared.** It is the base followed by `.well-known/oobi/<SAID>/index.json`. A source cannot place its definitions anywhere else, so bytes credited to a source always came from under its own address.
-- **The definition path follows an existing convention.** `/.well-known/oobi/<SAID>/index.json` is the shape GLEIF serves its vLEI schemas in today, and a file served there is what KERI calls a data OOBI: an address paired with a SAID, checked by the recipient. Serving under `index.json` gives the right content type on a static host. KERI itself has not settled on one path (open question 3).
-- **Everything read from a source document is checked before use.** A SAID must match the pattern in [Checking bytes](#checking-bytes-against-a-said); an address must pass the address rule. An entry that fails is dropped and counted. A reader ignores a member it does not know, and discards a document in which a known member has the wrong type.
+- **A definition's address is derived, never declared.** It is the base followed by `definitions/<SAID>.json`. A source cannot place its definitions anywhere else, so bytes credited to a source always came from under its own address.
+- **Where this stands with KERI.** A definition's address paired with its SAID is what the KERI specification calls an OOBI for self-addressed data: the address includes the SAID, and the recipient re-derives the SAID from the reply. The specification fixes no path shape. keripy's resolver accepts only `/oobi/<SAID>` at the root of a host, and only for schemas; a source at a host root could add that shape later for models that are KERI schemas. This cut does not, and nothing here uses `/.well-known/` for a source's own files: nothing probes a well-known location, the finder and introductions carry full addresses, and the specification defines the well-known `oobi` name for AIDs returning a pointer, not for data.
+- **Everything read from a source document is checked before use.** A SAID must match the pattern in [Checking bytes](#checking-bytes-against-a-said); an address must pass the address rule; an AID is at most 64 characters of `A-Z a-z 0-9 - _`. An entry that fails is dropped and counted. A reader ignores a member it does not know, and discards a document in which a known member has the wrong type.
 - **`refers` lists every SAID that appears in a served definition's bytes, other than its own.** See [SAIDs inside a definition](#saids-inside-a-definition). It lets a reader ask "which definitions here contain X" without fetching every definition. It is a claim until the reader fetches the definition and finds the SAID by the same scan.
 - **`catalogs` introduces catalogs the source's operator finds useful.** A reader who knows one source thereby learns of catalogs, which is how MAD's design says discovery starts ("bootstrapped introductions to available catalogs"). The build writes no catalog address the operator did not put in the configuration.
 - **Size.** A source document and a definition are each at most 1 MB, and the build refuses to write a larger one. At gym-bp's density of references a 1 MB source document lists about 5,500 definitions, but a catalog build fetches at most 500 from one source and a walk 50 (see [Fetching safely](#fetching-safely)). An operator with more than 500 splits into several sources that introduce each other.
 - **The files are the contract, not this tool.** A source can be written by hand or by another tool.
-- **A browser is not expected to read a source.** The walk runs in Node, so a source needs no cross-origin header. A static host works if it serves dot-folders, sends `.json` files as `application/json`, and sends them unencoded when no content encoding is asked for. This is part of open question 3, because it is costly to change once others run sources.
+- **A browser is not expected to read a source.** The walk runs in Node, so a source needs no cross-origin header. A static host works if it sends `.json` files as `application/json` and sends them unencoded when no content encoding is asked for.
 
 ### The robots.txt line
 
-`Mad-Source: <source address>` is the one thing an operator emits for parties who have never heard of them. It goes in any robots.txt the operator controls, on a line of its own, anywhere in the file. The field name is matched without regard to case, and text after a `#` is ignored. It may name a source on another host, so an operator can put it in the robots.txt of their main website while the source lives elsewhere, including under a path on a shared host.
+`Mad-Source: <source address>` is the one thing an operator emits for parties who have never heard of them. It reads, for example, `Mad-Source: https://gym.example/mad/source.json`. It goes in any robots.txt the operator controls, on a line of its own, anywhere in the file. The field name is matched without regard to case, and text after a `#` is ignored. It may name a source on another host, so an operator can put it in the robots.txt of their main website while the source lives elsewhere, including under a path on a shared host.
 
 The build prints the line, and a `Sitemap:` line for the pages. It never writes or edits a robots.txt, because that file belongs to the whole site.
 
@@ -175,6 +180,8 @@ Measured during the review. The scripts were not kept; the review record names e
 
 **What verified means.** These bytes have this SAID. It does not mean they are the one normal form of a definition. Making one meaning one SAID is MAD's work (bpm-nq3.1, bpm-nq3.3).
 
+**The envelope is MAD's.** The check presumes only the standard SAID derivation: the document has a slot for its SAID, blanked when the digest is computed. It presumes nothing about what surrounds the slot. A JSON envelope with `d` and a JSON Schema inside, the same envelope with LISP or CEL as text in a field, a KERI schema with its SAID in `$id`, and a serialization that is not JSON at all check the same way, provided each was hashed the standard way. What the envelope is, and what may sit inside it, is MAD's decision (bpm-nq3.1, bpm-nq3.3). Two places in this cut do assume JSON: the readable page renders a JSON outline and shows anything else as text, and the fetch rule accepts JSON content types for definitions. Each is a one-line change when another serialization appears; the check and the `refers` scan need none.
+
 ## SAIDs inside a definition
 
 A SAID *appears* in a definition wherever its bytes hold 44 characters that match the SAID pattern, with no base64url character directly before or after them. That covers a SAID that is a whole string value, an object key, or part of a longer string such as an address. `refers` is the set of SAIDs that appear, other than the definition's own, each once, sorted as strings.
@@ -185,17 +192,18 @@ An appearance is not always a reference, and a reference is not a relationship. 
 
 ## Publications
 
-A publication describes one exact definition for discovery. In MAD it is also its principal's endorsement.
+A publication is an offering: one exact definition put forward for others to find and reuse, the way a protocol, a standard or an application template is offered. It describes the definition for discovery and may say who offers it.
 
 ```json
-{ "target": "<SAID>", "name": "...", "description": "...", "tags": ["..."], "collection": "..." }
+{ "target": "<SAID>", "by": "<AID>", "name": "...", "description": "...", "tags": ["..."], "collection": "..." }
 ```
 
 - The record takes the four things MAD's Publish form asks for (name, description, tags, collection), all required there and here, plus the target's SAID.
-- **In this cut a publication names no principal and has no signature**, because no principal has a durable identifier yet (bpm-upm.25). MAD's endorsement belongs to a principal, and a retrieval host is not necessarily the signer. A reader therefore treats a publication as a description observed at a source address: claimed, never listed under an endorser, never counted.
-- **A publication has no identifier of its own.** The same text at two addresses is two claims, and nothing infers that it is one publication or two. A SAID over the description alone could not tell them apart either: two parties who keep the Publish form's prefilled values would get the same one.
-- **It does not bind MAD's signed publication.** What MAD signs is ruled under the `mad` label with bpm-nq3.5, and when it exists it replaces this record; the tool then reads one form, not two. When MAD designs its bundle, a source folder is the candidate format, so that there is one format and not two. That is decided there.
-- **How it differs from MAD's `Publication` type** (`mad/src/views.ts`). `tags` is a list; MAD's form holds one comma-separated string. `collection` is one string, and ` / ` inside it means nothing to this project. `target` is a SAID; in MAD today it is a prototype reference, until bpm-nq3.3. `endorser` is left out until it can be signed. `targetId` is left out because it is local to one MAD instance, `kind` because a reader takes it from the definition, and `components` because it belongs to assemblies.
+- **`by` is optional and names who offers the definition, as an AID.** When a publication has none, the source document's `by` applies, when it has one. Nothing here verifies it: it is attribution offered, not proved. A reader with KERI tooling can look the AID up on their own terms, starting from the source's `oobi` when it gives one.
+- **A publication is not an endorsement and is not signed.** The web it sits on is untrusted ground by default, as a KERI OOBI is. A reader fetches, checks bytes against SAIDs, and decides what to make of an offering elsewhere. A publication is therefore *claimed*, in MAD's three provenance states, and a catalog never counts it.
+- **A publication has no identifier of its own.** The same text at two addresses is two offerings, and nothing infers that they are one.
+- **It is the record MAD writes when it writes a source.** When MAD's publish step exists (bpm-nq3.5), it writes this record into a source folder, so there is one format and not two.
+- **How it differs from MAD's `Publication` type** (`mad/src/views.ts`). `tags` is a list; MAD's form holds one comma-separated string. `collection` is one string, and ` / ` inside it means nothing to this project. `target` is a SAID; in MAD today it is a prototype reference, until bpm-nq3.3. `by` is an optional AID; MAD's `endorser` is the local principal's id, and MAD's publish step maps one to the other when it has an AID to give. `targetId` is left out because it is local to one MAD instance, `kind` because a reader takes it from the definition, and `components` because it belongs to assemblies.
 - **Assemblies.** MAD's Publish screen has a fourth target, the assembly. It is not in this cut: a publication's target is a SAID, and whether an assembly gets one is bpm-nq3.6. If it does, an assembly is served and looked up like any definition.
 - **Limits.** A name or a collection is at most 200 characters, a description 2,000, and there are at most 32 tags of 64 characters each. No field holds a control character. A publication that breaks a limit is dropped and counted. The numbers are proposals.
 
@@ -203,7 +211,7 @@ A publication describes one exact definition for discovery. In MAD it is also it
 
 An introduction names another source's address and, when known, the SAIDs to look for there. `for` lists SAIDs the other source is expected to serve, carry a publication of, or serve a definition that contains.
 
-Introductions are entries in the build's configuration file, typed by the operator. The reader records the address of the source document each introduction was found in. That is a retrieval observation. MAD's introducer is a principal, and it stays unknown until introductions are signed.
+Introductions are entries in the build's configuration file, typed by the operator. The reader records the address of the source document each introduction was found in, and that source's `by` when it states one. That is a retrieval observation; nothing here verifies who made an introduction.
 
 Introductions point mostly one way. An adopter knows where it got a definition and can introduce that source. The source it came from is told nothing, so it cannot introduce its adopters unless its operator hears of them and adds them by hand. A walk from an adopter therefore reaches the source it adopted from. A walk from that first source reaches only the sources its operator added, and misses later adopters.
 
@@ -213,7 +221,7 @@ This design has no announce or ping step by which an adopter tells a source. Tha
 
 An edited definition is a new SAID. This cut connects it to the old one only when the new definition's bytes name the old SAID, as a bpm-core document's `supersedes` does when it was frozen as a SAID. The new one then appears among the definitions that contain the old one, and the place of the appearance is what tells a successor from a user.
 
-Nothing else connects them. For MAD the predecessor is not expected to be inside the definition: `derivedFrom` is state on a draft, and MAD's vision calls supersession a claim. Whether a publication carries that claim is part of open question 5.
+Nothing else connects them. For MAD the predecessor is not expected to be inside the definition: `derivedFrom` is state on a draft, and MAD's vision calls supersession a claim. A publication carries no such claim in this cut (decision 6).
 
 ## The walk
 
@@ -236,7 +244,7 @@ The report is one JSON document on standard output:
   "said": "<the SAID asked for>",
   "from": "<the starting source>",
   "serves":       [ { "source": "<address>", "via": ["<address>"] } ],
-  "publications": [ { "source": "<address>", "via": [], "publication": { "target": "...", "name": "...", "description": "...", "tags": [], "collection": "..." } } ],
+  "publications": [ { "source": "<address>", "via": [], "publication": { "target": "...", "by": "...", "name": "...", "description": "...", "tags": [], "collection": "..." } } ],
   "referrers":    [ { "source": "<address>", "via": [], "said": "<a definition that contains it>", "paths": ["/rely_on/0/said"], "appearances": 1 } ],
   "unresolved":   [ { "address": "<source address>", "via": [], "reason": "failed-check", "said": "<SAID>" },
                     { "address": "<source address>", "via": [], "reason": "truncated", "limit": "<name of the limit>" },
@@ -302,7 +310,7 @@ sources.json           every address tried: how it was found, its outcome (with 
                        `truncated`), the counts of dropped entries, a hex Blake3 digest of the source
                        document bytes read, and each definition or `refers` entry of that source that
                        did not end `verified`, with its outcome
-pages/index.html       the same rows as pages (open question 2)
+pages/index.html       the same rows as pages
 pages/<SAID>/index.html
 pages/style.css        the one stylesheet, as in a source
 ```
@@ -323,7 +331,7 @@ A catalog is built from documents written by strangers, so:
 - **How a source was found can be checked on its own.** For a finder, `sources.json` gives the finder's name, the snapshot and the place in it (for the robots line, the archive file and the record's offset). For an introduction, it gives every introducing address.
 - **No row is carried over from an earlier build.** A source that cannot be reached adds no rows and is listed with its outcome. A build cannot tell a source that is gone from one that was briefly down unless the host answers 404 or 410.
 - **An empty build writes nothing.** A build in which no source ended `ok` or `truncated` writes nothing and exits non-zero, so a network fault on the builder's side cannot replace a catalog with an empty one.
-- **The catalog repeats whatever names and descriptions strangers put in their publications**, unattended. This cut has no way to leave a source out.
+- **Posting is open.** A catalog repeats what sources say, and no build leaves a source out. A host accepts that strangers' text appears under its address. The protections are at keeping that text inert (see [Readable pages](#readable-pages)), not at keeping it out. This is the maintainer's decision (decision 3), made over a recommendation to add an exclusion list.
 
 ### Repeatable
 
@@ -350,7 +358,7 @@ Considered and set aside: a DNS TXT record (the open measurement datasets cover 
 
 **Recommendation.** Build the robots finder first, and state its reach. Its input is a named snapshot that never changes, it needs no account, and its analog was found end to end. It reaches parties who control a robots.txt on a website Common Crawl already captures, which is narrower than "anyone". Because the line may name a source on another host, the source itself can live anywhere.
 
-Not covered: a party whose only website is new and unlinked. They are found through introductions only. What, if anything, covers them is open question 1.
+Not covered: a party whose only website is new and unlinked, which is where the first adopters are most likely to be: developers whose site is a new `github.io` page. They are found through introductions, which the maintainer adds to his own source by hand as he hears of them. Nothing more is built for them until real sources show where they live (decision 5).
 
 Until a finder is proven on real hosts, a catalog covers only what is reachable from the addresses named with `--from`. A catalog built from those alone is a seeded crawl: its list of sources is somebody's hand-kept list, which Ruling 3 does not count as meeting the objective, and its `catalog.json` says so in those words.
 
@@ -368,7 +376,7 @@ The robots finder reads responses with status 200 only. Its snapshots are Common
 
 ### Who runs a catalog
 
-Nothing here requires the maintainer to run one. The objective is met when anyone can run the command, and a catalog he hosts is one copy among any number. Whether he does is open question 2. Two facts bear on it. `catalog find` reads about 165 GB for each crawl it has not already scanned: three crawls the first time, one for each new crawl after that. Few second copies will exist at that price, and until a second party runs the build his copy is the only one. And "anyone can run the same command" is true only once the tool is public (open question 4).
+Nothing here requires the maintainer to run one. The objective is met when anyone can run the command, and a catalog he hosts is one copy among any number. He has decided to host one, with pages, once the finder is proven on real hosts and the tool is public (decisions 1 and 4). Two facts bear on it. `catalog find` reads about 165 GB for each crawl it has not already scanned: three crawls the first time, one for each new crawl after that. Few second copies will exist at that price, and until a second party runs the build his copy is the only one. And "anyone can run the same command" is true only once the tool is public.
 
 If he does, it is a scheduled job with three stages that share nothing but files:
 
@@ -382,12 +390,12 @@ Dependencies are installed from a committed lockfile with install scripts disabl
 
 For each definition a source serves, the build writes one page at `pages/<SAID>/index.html`. It shows:
 
-- the names and descriptions from this source's publications of it;
+- the names and descriptions from this source's publications of it, and who offers it when a publication or the source says;
 - the SAID, and the command that checks it;
 - the definition's content as a readable outline, with each SAID inside it linked to that definition's page when this source serves it;
 - the definitions on this source that contain it, each with the place of the appearance;
 - the sources this source introduces for this SAID, shown by address and labelled as introductions;
-- the catalogs this source introduces, each linked to that catalog's page for this SAID, or to its row if catalogs carry no pages.
+- the catalogs this source introduces, each linked to that catalog's page for this SAID.
 
 `pages/index.html` lists what the source serves, by the names its publications give. A definition with no publication is titled by its SAID. A catalog's pages show its rows the same way: an index, and a page per SAID. On that page a source that serves the SAID is linked to its own page for it, and a definition that contains the SAID is linked to its serving source's page for that definition, in both cases only when the source document says it has pages. A source that only carries a publication of the SAID is shown by address. The pages carry no order but SAID order, no ranking and no form.
 
@@ -407,11 +415,11 @@ A page is a rendering and is evidence of nothing. The check runs on the bytes at
 
 ## AI Catalog entries
 
-When a source sits at the root of a host, the build also writes `/.well-known/ai-catalog.json` in the Linux Foundation AI Catalog format, with one entry per served definition: `identifier` (the SAID), `type` (`application/json`) and `url` (the definition's address). A display name or description, when present, comes only from this source's own publication of that definition. Nothing in the file is copied from a definition's content.
+When a source sits at the root of a host, the build also writes `/.well-known/ai-catalog.json` in the Linux Foundation AI Catalog format, with one entry per served definition: `identifier` (the SAID), `type` (`application/json`) and `url` (the definition's address). A display name or description, when present, comes only from this source's own publication of that definition. Nothing in the file is copied from a definition's content. This is the one dot-folder a source may have: GitHub Pages skips it unless told otherwise (a branch deploy needs an empty `.nojekyll`, an Actions deploy `include-hidden-files: true`).
 
 The format's optional `digest` member, a sha-256 of the served bytes, is left out. Nothing here reads it, no surveyed entry carried one, and the SAID stays the only digest of a definition this project writes. The hex Blake3 digest in a catalog's `sources.json` is of a source document as read; it identifies nothing and is there only so that two builds can be compared.
 
-This is an advertisement, not a foundation. The survey found about 200 to 250 domains serving such files. MCP's Server Cards extension reads this file for entries of its own type; no client or registry is known to read entries of another type from a domain nobody submitted. The fields are written against commit `6e26a18` of the specification (`Agent-Card/ai-catalog`, 2026-11-05), which had no tagged release when surveyed, and a test validates the output against it. ARD's file (`/.well-known/ard.json`) is not written: the two formats have diverged, and ARD needs an identifier and a display name a bare definition does not have. Whether these entries ship in this cut at all is open question 6.
+This is an advertisement, not a foundation. The survey found about 200 to 250 domains serving such files. MCP's Server Cards extension reads this file for entries of its own type; no client or registry is known to read entries of another type from a domain nobody submitted. The fields are written against commit `6e26a18` of the specification (`Agent-Card/ai-catalog`, 2026-11-05), which had no tagged release when surveyed, and a test validates the output against it. ARD's file (`/.well-known/ard.json`) is not written: the two formats have diverged, and ARD needs an identifier and a display name a bare definition does not have. They are the last step of the first epic and outside its acceptance (decision 9).
 
 ## Fetching safely
 
@@ -425,7 +433,7 @@ The walk, `get` and the catalog build fetch addresses chosen by strangers. All u
 - **Bytes on the wire are the bytes checked.** Requests ask for no content encoding, and an answer that carries one is refused. Size limits are enforced while reading, not from the stated length.
 - **A JSON file must arrive as `application/json` or a type ending in `+json`.** Nothing fetched is executed.
 - **The tool names itself**: `mad-discovery (+<address of this repository>)`. A catalog build obeys the robots.txt group for `mad-discovery`, or else the group for `*`, fetched once per host per build. A 4xx answer means no restrictions. A 5xx answer, no answer or a redirect means the host is skipped with the outcome `disallowed`. The walk is one person's own lookup and does not consult robots.txt.
-- **Tests opt in to plain HTTP, other ports and loopback** through one parameter that only test code sets. It relaxes the address rule and the routine's connection check together, in `build`, the walk, `get` and the catalog build, so `http://127.0.0.1:<port>/.well-known/mad/source.json` is a source address under test and nowhere else. No environment variable, configuration field or command-line flag does it.
+- **Tests opt in to plain HTTP, other ports and loopback** through one parameter that only test code sets. It relaxes the address rule and the routine's connection check together, in `build`, the walk, `get` and the catalog build, so `http://127.0.0.1:<port>/mad/source.json` is a source address under test and nowhere else. No environment variable, configuration field or command-line flag does it.
 - **Proxies.** A reader who can reach the web only through a proxy cannot run a walk in this cut, because the check above needs the connection. Proxy settings in the environment are ignored.
 
 Limits. The rows are what must exist; the numbers are proposals for the maintainer to change. They are constants in one module, and a catalog build writes the ones it ran with into `catalog.json`.
@@ -471,16 +479,14 @@ Within a source, each definition it lists ends `verified` or `failed-check`, or 
 | State | What it covers |
 |---|---|
 | Verified | These bytes have this SAID. This definition's bytes contain that SAID. |
-| Claimed | Everything a publication says; a publication names no endorser. What a source document says it serves or contains, until the reader has checked it. |
+| Claimed | Everything a publication says, including who it says offers the definition. What a source document says it serves, contains, or who runs it, until the reader has checked what can be checked. |
 | Unresolved | A source that could not be read. Bytes that failed the check. A SAID a source says a definition contains that is not in the bytes. An introduction that names the SAID when the source it points to has nothing about it. An introduction that was not followed because a limit was reached. |
 
 These are MAD's three provenance states. Where each record was fetched is a retrieval observation kept beside every entry (`source`, and `via` for how the walk got there); it is not a fourth state. No entry carries a time: a walk's report is of one run, so whoever keeps it records when it ran, and a catalog's files carry no times so that two builds compare. The states are the walk's labels for what it checked on this run. What MAD's provenance panel shows is decided there (bpm-upm.21).
 
-Nothing else is known in this cut. In particular a source can serve, or carry a publication of, any SAID at no cost, so the number of sources doing either is not a vote.
+**Untrusted ground, by design.** Everything here is served over the open web, which is untrusted by default, exactly as a KERI OOBI is. The reader fetches, checks bytes against SAIDs, and takes everything else as what the source says. A source can serve, or carry a publication of, any SAID at no cost, and can state any AID, so none of those is a vote and none is proof. What to make of an offering, and whether to look up the AID that offers it, is the reader's decision, made with whatever tools they trust. This project does not judge ideas and does not plan to.
 
-**An address can change hands.** A domain lapses, a host account is released, a DNS record outlives the bucket it pointed to. Whoever holds the address then inherits every introduction that names it. A statement attributed to an address says who controlled that address when it was fetched and nothing about who controlled it before.
-
-**What signatures will and will not change.** A signed publication names its endorsing principal and carries a signature by that principal's self-held key. A reader who can check it can confirm which principal made the statement, whatever address served it, and that survives a change of address. It does not make a count meaningful: a self-held key costs nothing to create, so a reader can count only the principals they already have a reason to believe. Third parties can then publish signed statements about a definition they did not write, which is how an assessment travels with a definition instead of living on a reference site. On KERI such a statement would be an untargeted ACDC (a signed credential addressed to no particular holder); the mapping is bpm-upm.26's to specify. That work waits on durable keys (bpm-upm.25) and MAD's signed publication (bpm-nq3.5). Serving, the walk and the catalog stay as they are; the publication record is replaced.
+**An address can change hands.** A domain lapses, a host account is released, a DNS record outlives the bucket it pointed to. Whoever holds the address then inherits every introduction that names it. A statement attributed to an address says who controlled that address when it was fetched and nothing about who controlled it before. A stated AID says who the operator says they are, and no more.
 
 ## The tool
 
@@ -499,7 +505,7 @@ Every command prints JSON on standard output and exits 0 on success, 1 on failur
 
 | Command | Fails when | What it does then |
 |---|---|---|
-| `build` | The configuration is unreadable or has an unknown member; an input is misnamed or does not verify; a SAID named in `serve` has no input file; an output would exceed a size limit; `--out` is not empty | Names every failing file, writes nothing, exits 1 |
+| `build` | The configuration is unreadable or has an unknown member; an input is misnamed or does not verify; an AID does not match its pattern; a SAID named in `serve` has no input file; an output would exceed a size limit; `--out` is not empty | Names every failing file, writes nothing, exits 1 |
 | `verify` | The bytes fail the check, or the fetch is refused | Prints the expected SAID, the computed one and the reason, exits 1 |
 | `who` | The starting source cannot be read | Exits 1. Any later failure is an unresolved entry, and the command exits 0 |
 | `get` | The starting source cannot be read; the definition asked for was not fetched and verified | Writes nothing, exits 1. A SAID that appears in a fetched definition and was not found is listed as missing; the verified files are written and the command exits 0, because an appearance is not always a definition |
@@ -514,7 +520,9 @@ Every command prints JSON on standard output and exits 0 on success, 1 on failur
 
 ```json
 {
-  "source": "https://gym.example/.well-known/mad/source.json",
+  "source": "https://gym.example/mad/source.json",
+  "by": "<AID, optional>",
+  "oobi": "<https address, optional>",
   "serve": ["<SAID>"],
   "publications": [ { "target": "<SAID>", "name": "...", "description": "...", "tags": ["..."], "collection": "..." } ],
   "introductions": [ { "source": "<source address>", "for": ["<SAID>"] } ],
@@ -522,7 +530,7 @@ Every command prints JSON on standard output and exits 0 on success, 1 on failur
 }
 ```
 
-`source` is required: it is the address the folder will be served at, and a folder is built for one address. The rest default to empty. The build computes what can be computed (`refers`, the pages) and the operator writes the rest by hand: one publication for each definition they want found by name, and one introduction for each source they know. That file is the whole cost to an operator.
+`source` is required: it is the address the folder will be served at, and a folder is built for one address. `by` and `oobi` are optional. The rest default to empty. The build computes what can be computed (`refers`, the pages) and the operator writes the rest by hand: one publication for each definition they want found by name, and one introduction for each source they know. That file is the whole cost to an operator.
 
 **What a source serves.** The configuration names the SAIDs to serve; when it names none, every publication's target that the input folder holds. A SAID named in `serve` that the input folder does not hold is refused by name. `build` serves those and every definition that appears in them, transitively, that the input folder holds, and nothing else from the folder. A bpm-core store keeps superseded freezes beside current ones, so serving a whole folder would serve the leftovers. The build reports each SAID that appears in what it serves, that it does not serve, and that no introduction names in `for`. A publication may target a definition the source does not serve.
 
@@ -550,25 +558,39 @@ Every command prints JSON on standard output and exits 0 on success, 1 on failur
 
 ## Acceptance
 
-This is the proposed `done_when` for the epic bpm-5g1. It replaces the one written before the design.
+The work is two epics under this one design (decision 1): bpm-5g1 and bpm-7h1.
+
+**First epic, bpm-5g1: a second party can read, verify, look up and bring home a definition.** Its `done_when`:
 
 1. **Walk.** The walk test passes: three sources on three local origins, the first introducing the second and the second the third; the walk from the first lists all three as serving the SAID, each verified by the byte check and shown with its chain, and lists what it could not resolve. The `who` command line cannot reach a local origin, so this clause is met by the test.
-2. **Stranger, by fixture.** The test above passes.
-3. **Stranger, live.** Two real sources that never link to each other and are named on no command line. Each has its `Mad-Source` line in a robots.txt that Common Crawl already captures with status 200. A catalog built by the documented command from named crawls lists both for the same SAID. Until this passes the finder is not proven, and the objective is not shown to be met for strangers. This clause waits on a third party's schedule: a new line shows up in a crawl 3 days to 7 weeks after it is added, and a crawl can miss either host, so it can take one or two crawls and hold the epic open.
-4. **Pages.** Every definition a source serves has a page. If catalogs carry pages, a person reaches each source's page for a SAID from a catalog's index page by links alone.
-5. The maintainer has approved this design.
+2. **Pages.** Every definition a source serves has a page, and the source's index page lists what it serves.
+3. **Get.** The get test passes: a definition and everything that appears in it, split between two sources, is fetched, verified and written in the shape `build` reads.
+4. The maintainer has approved this design. Done 2026-11-09.
+
+**Second epic, bpm-7h1: a stranger is found without being told.** Opened now, blocked by the first, started when the maintainer says. Its `done_when`:
+
+1. **Stranger, by fixture.** The test above passes: two sources that never link to each other, a WARC fixture in the shape of Common Crawl's robots.txt archive naming both, `catalog find` over it, and a catalog built from its candidate file lists both for the same SAID.
+2. **Stranger, live.** Two real sources that never link to each other and are named on no command line. Each has its `Mad-Source` line in a robots.txt that Common Crawl already captures with status 200. A catalog built by the documented command from named crawls lists both for the same SAID. Until this passes the finder is not proven, and the objective is not shown to be met for strangers. This clause waits on a third party's schedule: a new line shows up in a crawl 3 days to 7 weeks after it is added, and a crawl can miss either host, so it can take one or two crawls and hold the epic open.
+3. **Catalog pages.** From a catalog's index page a person reaches each source's page for a SAID by links alone.
 
 ## Build order
 
-0. Once open questions 3 and 4 are ruled: write two one-definition sources by hand, both serving the same definition, put a `Mad-Source` line naming each in a robots.txt that Common Crawl already captures with status 200, on two hosts that do not link to each other, and record the date. This needs no code, and it starts the clock on a public input that arrives every four to five weeks.
+**First epic.** These steps need no hosting, no domain and no cloud account.
+
 1. The SAID check, `build`, the readable pages and the source's index page, over gym-bp's frozen documents. No network.
 2. Introductions, the walk and `get`, tested across local origins.
-3. The catalog build from named sources, and its pages.
-4. The robots finder (`catalog find`) against the fixture, then one full scan of a real crawl, which shows whether it fits the job it will run in.
-5. The live check, which is acceptance clause 3: the two sources from step 0, rebuilt with `build` and deployed at the same addresses, and a catalog built with no source address on the command line that lists both for the same SAID.
-6. AI Catalog entries, if open question 6 keeps them.
+3. AI Catalog entries. Outside acceptance.
 
-Steps 1 to 3 need no hosting, no domain and no cloud account. Step 4 downloads about 165 GB once. Each step is planned and reviewed before it starts, and nothing is deployed without the maintainer's say.
+When the first epic closes, the repository becomes public (decision 4), and the README names the one part that may still change: the publication record, which MAD's publish step adopts or adjusts.
+
+**Second epic**, when the maintainer says.
+
+4. Two robots.txt files that Common Crawl already captures with status 200, on hosts that do not link to each other, each checked against the newest crawl's index first. Two one-definition sources written by hand, both serving the same definition, placed on those hosts or anywhere else, and a `Mad-Source` line naming each. The date recorded. This needs no code and starts the Common Crawl clock, which runs every four to five weeks.
+5. The catalog build from named sources, and its pages.
+6. The robots finder (`catalog find`) against the fixture, then one full scan of a real crawl, about 165 GB, which shows whether it fits the job it will run in.
+7. The live check, which is the second epic's clause 2: the two sources from step 4 rebuilt with `build` at the same addresses, and a catalog built with no source address on the command line that lists both for the same SAID. Then the maintainer's catalog goes up, with pages.
+
+Each step is planned and reviewed before it starts, and nothing is deployed without the maintainer's say.
 
 ## What waits on other work
 
@@ -576,40 +598,25 @@ Steps 1 to 3 need no hosting, no domain and no cloud account. Step 4 downloads a
 |---|---|
 | MAD's own definitions as content | SAIDs for MAD definitions (bpm-nq3.1, then bpm-nq3.3) and a way to write out, for each, exactly the bytes its SAID was computed over (bpm-nq3.5, or the shared store bpm-vfn.1). Display names and other annotations MAD keeps outside the committed definition travel in publications. |
 | A renderer that knows MAD's kinds | MAD's shared library (bpm-vfn.3, after the format ruling bpm-vfn.1) |
-| Signed publications and third-party assessments | A durable key bound to a principal (bpm-upm.25) and MAD's signed publication (bpm-nq3.5, after bpm-nq3.2). Their KERI form waits on bpm-upm.26. |
 | Publications of assemblies, and a page for a MAD protocol as a set | Whether assemblies or selections get SAIDs (bpm-nq3.6) |
 | Using and retaining what is found inside MAD | The provenance panel and Explore (bpm-upm.21, bpm-upm.22). How a report reaches MAD follows the store ruling (bpm-vfn.1). |
 | Searching by business term or tag across sources | Tag search (bpm-nq3.7) and Explore (bpm-upm.22). Until then a catalog's index is the only cross-source list. |
 | Finding similar, not identical, definitions | Structural category (bpm-nq3.7, bpm-upm.23) |
 | Landing fetched definitions in an authoring store | bpm-core's pull (bpm-n13.3) or MAD's import (bpm-upm.21). bpm-core's open epic bpm-n13 designs the same serve-and-fetch layer for its own CLI, and a source is the HTTP provider it deferred (bpm-n13.4). Whether bpm-core keeps those commands is for its evaluation (mad/HANDOFF.md Ruling 5). |
 
-## Open questions for the maintainer
+## Decisions made at review
 
-Each leads with the decision and a recommendation. Approving the design accepts the recommendations unless he says otherwise.
+The maintainer made these on 2026-11-09: first by approving the second draft with its recommended answers, then in a stress test that walked through nine branches. Each is mirrored as a numbered ruling in the [README](../README.md#rulings) and as a closed `Rule:` bead.
 
-1. **Is the robots line's reach enough for a first cut, and what covers a new website nobody linked?**
-   Recommended: build the robots finder, state its reach, and add nothing for new unlinked hosts yet. They are found through introductions until there are real sources to justify more.
-   Alternatives for new hosts: (a) the certificate label, which costs each operator a `mad-source.` host name and the builder a paid search at 49 euros a month; (b) GitHub repository search, free and current within a minute, but one company's index and not repeatable.
-
-2. **Does the maintainer host a catalog of his own, and does a catalog carry pages a person can browse?**
-   Recommended: yes to both, starting once the finder is proven on real hosts and the tool is public; one scheduled build per new crawl. Pages because otherwise nothing a person can open spans two sources until MAD's Explore exists (bpm-upm.22), and somebody would make a site over the JSON.
-   The costs: about 165 GB read for each new crawl, and three times that for the first build; while it is the only catalog it is the index in practice; and his address shows strangers' claimed text, unattended, with no way in this cut to leave a source out.
-   Alternatives: JSON only; or host none and leave every reader to build their own.
-
-3. **Are these the names, paths and rules a source must follow?**
-   Recommended as written: the source document at `/.well-known/mad/source.json`; definitions at `/.well-known/oobi/<SAID>/index.json`, derived and never declared; pages under `pages/`; a catalog's four file names; the robots line `Mad-Source:`; no cross-origin header required, because the walk runs in Node. The definition path is the one GLEIF serves in production. It is not settled across KERI: the survey found three well-known OOBI paths live at once (the specification's, keripy's and GLEIF's) and no IANA registration. The rest are new. One cost: an operator whose files already sit at another path must copy them. All of it is cheap to change before anyone else runs a source and costly after.
-
-4. **Going public: where does his source live, what does it serve first, and when is the repository public?**
-   - *Where.* Recommended: at the root of a domain he controls, because the address goes into other parties' introductions. For acceptance clause 3 he needs two robots.txt files that Common Crawl already captures with status 200, on two hosts that do not link to each other. A lookup in the newest crawl's index files, by range request and with no account, says whether a host qualifies; Common Crawl's hosted index server answered 504 to most lookups when measured. A capture that is a redirect, a 403 or a 404 does not qualify. The sources themselves can be anywhere. S3 behind CloudFront on its flat-rate free plan in the `personal` account has no overage charges, so a flood of requests cannot become a bill; what the plan does once its allowance is used up is to be confirmed before deploying. GitHub Pages is the cheaper second origin. GitHub Pages needs a setting to serve this layout, because it skips dot-folders: a branch deploy needs an empty `.nojekyll`, and an Actions deploy needs `include-hidden-files: true`.
-   - *What it serves.* Until MAD definitions have SAIDs (bpm-nq3.3) the only content is gym-bp's frozen documents: test data under Ruling 2, bpm-core documents and not MAD definitions, from a private repository. Recommended: a small set he picks, with publications whose descriptions say they are test data, because the finder can only be proven on a live source. The alternative is to hold the live check until bpm-nq3.3.
-   - *When the tool is public.* Ruling 1 created the repository private. Until it is public nobody else can rebuild a catalog or run `verify`, so "anyone can rebuild" is true of the file formats and not of the tool. Recommended: make it public before step 5, and host no catalog before then. Others run it from a clone with Node 24.
-
-5. **Is the first-cut publication record right?**
-   Recommended: the four description fields and the target's SAID, with no endorser, no identifier of its own and no lineage claim. This does not decide MAD's signed publication (bpm-nq3.5).
-   Alternatives: give it a SAID now, which fixes a field order here before bpm-nq3.1 is ruled; add an optional `supersedes` SAID, claimed like the rest, so a source can say what a definition replaced. The second answers "what replaced what" sooner, but supersession is the claim that most needs a known signer, and it adds a field MAD's Publish form does not collect.
-
-6. **Do AI Catalog entries ship in this cut, and is ARD's file dropped?**
-   Recommended: keep the AI Catalog entries as the last step and outside acceptance, without the digest; drop ARD's file. It is one small generated file and the only thing here that existing agent tooling could read. The case against: no known reader for entries of this type, and a specification with no tagged release.
+1. **Two epics, one design.** bpm-5g1 is narrowed to the known-address half: sources, pages, the walk and `get`. A second epic holds the catalog and the finder and starts when he says. (Ruling 4)
+2. **A source is one plain folder.** `source.json`, `definitions/<SAID>.json` and `pages/`, placed anywhere; no `/.well-known/` and no OOBI-shaped path for a source's own files. A keripy-shaped `/oobi/<SAID>` for schema models is a possible later extra for root-hosted sources. (Ruling 5)
+3. **Posting is open.** No exclusion list. A catalog repeats what sources say; a host accepts strangers' text under its address; the protections keep that text inert and do not keep it out. Made over a recommendation to add an exclusion list. (Ruling 6)
+4. **Going public.** The repository becomes public when the first epic closes, not before the live check. The first deployed source serves a small set of gym-bp's documents labelled as test data. Hosts for the live check are chosen when the second epic starts, each checked against the crawl index first. (Ruling 4)
+5. **The robots.txt line is the only finder for now**, and the first cut's ceilings stand: 1,000 sources per build, 500 definitions per source, one index file, about 165 GB per crawl. A GitHub search finder, one company's index, is added only if real adopters turn out to need it. (Ruling 9)
+6. **Publications are offerings.** A publication puts a definition forward as an idea, a type, a schema, a category or a template; it is not an endorsement and is not signed. A source document may state `by` (the operator's AID) and `oobi` (where to resolve it); a publication may state its own `by`. All stated, nothing verified here. The design carries no signature framing: the web is untrusted ground by design, as a KERI OOBI is, and judging ideas is not this project's job. No identifier of its own and no lineage claim. (Ruling 7)
+7. **The SAID check is format-agnostic, and the envelope is MAD's.** The check presumes only the standard SAID derivation and nothing about the envelope or the language inside it. JSON-only rendering and content types are a noted extension point. (Ruling 8)
+8. **`get` is in the first cut.** It is the network half of reuse; bpm-core's pull and MAD's import are the storage half and can call it. (Ruling 9)
+9. **AI Catalog entries stay; ARD's file does not.** The entries are the first epic's last step, outside its acceptance, without the optional digest. (Ruling 9)
 
 ## Defaults chosen here
 
@@ -618,7 +625,6 @@ Smaller choices this draft made. Each is cheap to change now; say so if one is w
 - The byte check refuses a document whose own content holds 44 consecutive `#`, or a `#` directly before its own SAID.
 - `refers` is a scan of bytes for anything shaped like a SAID. It records appearances, not references.
 - `verify` requires the SAID.
-- `get` is in this cut. It is the network half of reuse, and bpm-core's pull is parked under mad/HANDOFF.md Ruling 5.
 - The walk keeps nothing between runs. The first draft's local folder duplicated the retention the README assigns to `mad`.
 - A robots line may name a source on another host, and a finder reads one line per robots.txt. Allowing another host widens the finder's reach to anyone who controls a robots.txt somewhere; the cost is that a robots.txt can send every builder one small request to an address of its choosing.
 - A build takes the candidates of the three most recent crawls together. Reading only the newest would drop and re-add about a fifth of sources from one build to the next. The price is that a source stays listed for up to three crawls after its robots line is removed, unless its source document is gone.
@@ -629,6 +635,44 @@ Smaller choices this draft made. Each is cheap to change now; say so if one is w
 - A SAID that no source serves gets no catalog row, even when definitions contain it.
 - From one source a catalog row takes one publication of a SAID and at most 50 definitions that contain it.
 - The time and byte limits are per host, not per source, so that a build's worst-case length is bounded. A shared host with many sources under one host name gets one host's allowance for all of them.
+
+## Stress Test Results: the mad-discovery design
+
+Run on 2026-11-09 with the maintainer, after he approved the second draft. Nine branches, one at a time, each with a recommendation; he agreed with four and changed five.
+
+### Resolved decisions
+
+- **Build order.** Two epics under one design; the catalog half starts when the maintainer says. Agreed as recommended.
+- **File layout.** One plain folder per source; `/.well-known/` and the OOBI-shaped path dropped for a source's own files. The recommendation reversed the second draft's, after checking the KERI specification (well-known `oobi` is for AIDs and returns a pointer; a data OOBI fixes no path) and keripy (`/oobi/<SAID>` at a host root, schemas only). Agreed.
+- **Abuse control.** Recommended a public exclusion list for a hosted catalog. The maintainer overruled it: posting is open by intent, definitions are types and categories rather than anything that runs, the web is untrusted ground like a KERI OOBI, and authorization happens elsewhere. Recorded as his decision.
+- **Going public.** Repository public when the first epic closes, not before the live check; test data labelled; hosts chosen and checked when the catalog epic starts. Agreed as recommended.
+- **Finder reach and ceilings.** Robots.txt finder only; first adopters are likely reached by introductions, not the finder; ceilings accepted as stated. Agreed.
+- **Publication record.** The maintainer reframed it: a publication is an offering of an idea, not an endorsement, and signatures are not what the design should be waiting for. Added the optional `by` AID on a publication and on a source, with an optional `oobi` for the source's AID; removed the signature framing throughout. Modified.
+- **SAID check.** Format-agnostic, with the envelope left to MAD; the maintainer wants no specified format beyond the SAID's slot, and definitions that may one day be LISP or CEL rather than JSON Schema. The check already allows that; the JSON assumptions in rendering and content types are noted as an extension point. Agreed, with the clarification added.
+- **`get`.** Kept. Agreed.
+- **AI Catalog entries.** Kept as the first epic's last step, outside acceptance; no ARD file. Agreed.
+
+### Changes made
+
+- Acceptance and build order split into two epics; `get` added to the first epic's acceptance.
+- Source layout, address rule, derived definition address, robots line example and configuration example changed to the plain folder. The "Where this stands with KERI" rule replaces the convention claim. Dot-folder notes now apply only to the AI Catalog file.
+- "Posting is open" written into the promises and the catalog rules; the sentence "this cut has no way to leave a source out" replaced.
+- Publications rewritten as offerings; `by` and `oobi` added to the source document and `by` to publications; the Trust section rewritten around untrusted ground; the signature paragraph and the "signed publications" waiting row removed; Terms rows for Publication, Source document and AID changed.
+- The envelope paragraph added to the check section.
+- Open questions replaced by Decisions made at review; rulings 4 to 9 mirrored in the README.
+
+### Deferred / parking lot
+
+- A keripy-resolvable `/oobi/<SAID>` shape for models that are KERI schemas, for sources at a host root.
+- A GitHub search finder, if real adopters live where the robots.txt finder cannot see.
+- What a build does when it has more candidates than its limit (it stops and writes nothing); theoretical until there are adopters.
+- Non-JSON definition serializations: the page renderer and the accepted content types.
+
+### Confidence assessment
+
+- Overall: high for the first epic, which is small, needs no network beyond local test servers, and rests on a check measured against real documents. Medium for the second: the finder's reach is measured and narrow, its proof waits on Common Crawl, and open posting means the hosted catalog will carry whatever is offered.
+- Areas of concern: no party other than the maintainer runs a source yet, so every format here is untested against a stranger's hand; the publication record is the part most likely to change when MAD's publish step exists.
+
 
 ## What was dropped from the draft spec
 
