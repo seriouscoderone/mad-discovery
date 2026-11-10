@@ -95,3 +95,27 @@ test("each finishes when an item's work rejects, and with no items", async () =>
   assert.deepEqual(done, ["y"]);
   await s.each([], () => "", async () => {});
 });
+
+test("a malformed address answers refused-address without a request, as fetchJson does", async () => {
+  const s = new Session(limits({}), { test: true });
+  assert.deepEqual(await s.fetch("not a url"), { outcome: "refused-address", read: 0, ms: 0 });
+});
+
+test("each rejects before any work when an item's host cannot be computed", async () => {
+  const s = new Session(limits({}), { test: true });
+  const ran: string[] = [];
+  const bad = new Error("no host");
+  await assert.rejects(
+    s.each(["a", "b"], (i) => { if (i === "b") throw bad; return i; }, async (i) => { ran.push(i); }),
+    (e) => e === bad,
+  );
+  assert.deepEqual(ran, [], "no work started");
+});
+
+test("a synchronous throw in work ends only its item", async () => {
+  const s = new Session(limits({}), { test: true });
+  const done: string[] = [];
+  const work = (i: string): Promise<void> => { if (i === "x") throw new Error("sync boom"); done.push(i); return Promise.resolve(); };
+  await s.each(["x", "y", "z"], (i) => i, work);
+  assert.deepEqual(done, ["y", "z"]);
+});

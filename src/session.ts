@@ -1,5 +1,5 @@
 import { fetchJson, type Fetched, type Resolve } from "./fetch.ts";
-import type { AddressOptions } from "./address.ts";
+import { parseHttpsAddress, type AddressOptions } from "./address.ts";
 import type { Limits } from "./limits.ts";
 
 export type SessionOptions = AddressOptions & { resolve?: Resolve; now?: () => number };
@@ -51,12 +51,13 @@ export class Session {
 
   /** One request within the request, host and run limits, charged to its host whatever the outcome. */
   async fetch(address: string): Promise<Fetched> {
-    const name = Session.hostOf(address);
-    const h = this.host(name);
+    const href = parseHttpsAddress(address, { test: this.test });
+    if (href === null) return { outcome: "refused-address", read: 0, ms: 0 };
+    const h = this.host(Session.hostOf(href));
     const timeoutMs = Math.min(this.limits.requestMs, this.limits.hostMs - h.ms, this.remainingRun());
     const maxBytes = Math.min(this.limits.fileBytes, this.limits.hostBytes - h.bytes);
     if (timeoutMs <= 0 || maxBytes <= 0) return { outcome: "timed-out", read: 0, ms: 0 };
-    const r = await fetchJson(address, { test: this.test, resolve: this.resolve, now: this.now, timeoutMs, maxBytes });
+    const r = await fetchJson(href, { test: this.test, resolve: this.resolve, now: this.now, timeoutMs, maxBytes });
     h.ms += r.ms;
     h.bytes += r.read;
     // A body cut by the host's remaining bytes rather than the file limit means the host is used up, not that the file is bad.
@@ -66,18 +67,17 @@ export class Session {
 
   /** Runs work over the items in order: at most hostsInFlight hosts at a time, one item at a time per host. A rejection ends only its item. */
   async each<T>(items: T[], hostOf: (item: T) => string, work: (item: T) => Promise<void>): Promise<void> {
-    const pending = [...items];
+    const pending = items.map((item) => ({ item, host: hostOf(item) }));
     const busy = new Set<string>();
     await new Promise<void>((done) => {
       const pump = (): void => {
         while (busy.size < this.limits.hostsInFlight) {
-          const i = pending.findIndex((item) => !busy.has(hostOf(item)));
+          const i = pending.findIndex((p) => !busy.has(p.host));
           if (i < 0) break;
-          const item = pending.splice(i, 1)[0]!;
-          const name = hostOf(item);
-          busy.add(name);
-          const release = (): void => { busy.delete(name); pump(); };
-          work(item).then(release, release);
+          const { item, host } = pending.splice(i, 1)[0]!;
+          busy.add(host);
+          const release = (): void => { busy.delete(host); pump(); };
+          Promise.resolve().then(() => work(item)).then(release, release);
         }
         if (pending.length === 0 && busy.size === 0) done();
       };
