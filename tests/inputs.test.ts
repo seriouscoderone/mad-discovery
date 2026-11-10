@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, cpSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, cpSync, writeFileSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readInputs } from "../src/inputs.ts";
@@ -30,4 +30,27 @@ test("refusals are by name with a reason", () => {
   assert.match(refused.find((r) => r.file === "notes.json")!.reason, /not named by a SAID/);
   assert.match(refused.find((r) => r.file.startsWith("EGQ3"))!.reason, /does not verify/);
   assert.match(refused.find((r) => r.file.startsWith("EAAA"))!.reason, /1 MB/);
+});
+
+test("dot-files in the folder are skipped, not refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inputs-"));
+  cpSync(pretty, dir, { recursive: true });
+  const count = readdirSync(dir).length;
+  writeFileSync(join(dir, ".DS_Store"), "junk");
+  const { inputs, refused } = readInputs(dir);
+  assert.deepEqual(refused, []);
+  assert.equal(inputs.size, count);
+});
+
+test("a file that cannot be read is a named refusal and the rest is still read", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inputs-"));
+  cpSync(pretty, dir, { recursive: true });
+  const count = readdirSync(dir).length;
+  const dangling = "EB" + "A".repeat(42) + ".json";
+  symlinkSync("/nonexistent", join(dir, dangling));
+  const { inputs, refused } = readInputs(dir);
+  assert.equal(inputs.size, count);
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0]!.file, dangling);
+  assert.match(refused[0]!.reason, /cannot be read/);
 });
