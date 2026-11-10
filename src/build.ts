@@ -2,7 +2,8 @@ import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { checkSaid } from "./said.ts";
 import { appearances } from "./scan.ts";
-import { LIMITS, type ServesEntry, type SourceDocument } from "./source.ts";
+import type { ServesEntry, SourceDocument } from "./source.ts";
+import { FILE_BYTES } from "./limits.ts";
 import type { Inputs } from "./inputs.ts";
 import type { Config } from "./config.ts";
 import { renderPages, sitemapXml } from "./pages.ts";
@@ -76,7 +77,7 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
 
   const files = new Map<string, Uint8Array>();
   const sourceBytes = encoder.encode(JSON.stringify(document, null, 2) + "\n");
-  if (sourceBytes.length > LIMITS.file) problems.push(`source.json would be ${sourceBytes.length} bytes, over 1 MB; split the source`);
+  if (sourceBytes.length > FILE_BYTES) problems.push(`source.json would be ${sourceBytes.length} bytes, over 1 MB; split the source`);
   files.set("source.json", sourceBytes);
   for (const said of saids) {
     const bytes = inputs.get(said)!;

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isSaid, checkSaid } from "./said.ts";
 import { compactJson } from "./compact.ts";
-import { LIMITS } from "./source.ts";
+import { FILE_BYTES } from "./limits.ts";
 
 /** SAID to the compact, verified bytes of that definition. */
 export type Inputs = Map<string, Uint8Array>;
@@ -25,7 +25,7 @@ export function readInputs(dir: string): { inputs: Inputs; refused: { file: stri
     } catch (e) { refused.push({ file, reason: `cannot be read: ${errorText(e)}` }); continue; }
     if (!file.endsWith(".json") || !isSaid(file.slice(0, -5))) { refused.push({ file, reason: "not named by a SAID" }); continue; }
     const said = file.slice(0, -5);
-    if (size > LIMITS.file) { refused.push({ file, reason: "larger than 1 MB" }); continue; }
+    if (size > FILE_BYTES) { refused.push({ file, reason: "larger than 1 MB" }); continue; }
     let raw: Uint8Array;
     try { raw = new Uint8Array(readFileSync(path)); }
     catch (e) { refused.push({ file, reason: `cannot be read: ${errorText(e)}` }); continue; }

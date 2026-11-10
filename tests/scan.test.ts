@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { appearances, paths, PATH_LIMITS } from "../src/scan.ts";
+import { appearances, paths } from "../src/scan.ts";
+import { PATH_LIMITS } from "../src/limits.ts";
 
 const PAID = "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U";
 const PAYMENT_RECEIVED = "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL";

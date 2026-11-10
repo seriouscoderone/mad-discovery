@@ -1,6 +1,6 @@
 import { isSaid } from "./said.ts";
 
-export const PATH_LIMITS = { maxPaths: 16, maxLength: 256, maxDepth: 64 } as const;
+import { PATH_LIMITS } from "./limits.ts";
 
 const B64 = /[A-Za-z0-9_-]/;
 const CANDIDATE = /E[A-P][A-Za-z0-9_-]{42}/g;
