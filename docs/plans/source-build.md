@@ -1433,6 +1433,24 @@ test("writePlan needs an absent or empty folder and writes every file", () => {
   writeFileSync(join(out, "stray.txt"), "x");
   assert.throws(() => writePlan(plan, out), /not empty/);
 });
+
+test("a publication's by is its second member", () => {
+  const cfg = JSON.parse(gymConfig);
+  cfg.publications[0].by = "EKxy";
+  const plan = planBuild(readInputs(gymDir()).inputs, parseConfig(JSON.stringify(cfg)));
+  assert.deepEqual(Object.keys(plan.document.publications[0]!), ["target", "by", "name", "description", "tags", "collection"]);
+});
+
+test("a source.json over 1 MB is refused", () => {
+  const cfg = JSON.parse(gymConfig);
+  const first = cfg.publications[0];
+  cfg.publications = Array.from({ length: 600 }, () => ({ ...first, description: "x".repeat(2000) }));
+  const { inputs } = readInputs(gymDir());
+  assert.throws(
+    () => planBuild(inputs, parseConfig(JSON.stringify(cfg))),
+    (e: unknown) => e instanceof BuildError && e.problems.join("\n").includes("source.json"),
+  );
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -1549,7 +1567,7 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
   return {
     files,
     document: ordered,
-    unserved: [...unserved].sort().map(([said, from]) => ({ said, appearsIn: [...from].sort() })).filter((u) => !introducedFor.has(u.said)),
+    unserved: [...unserved.keys()].sort().map((said) => ({ said, appearsIn: [...unserved.get(said)!].sort() })).filter((u) => !introducedFor.has(u.said)),
     robotsLine: `Mad-Source: ${config.source.address}`,
     sitemapLine: `Sitemap: ${config.source.base}sitemap.xml`,
   };
@@ -1563,8 +1581,12 @@ function orderDocument(d: SourceDocument): SourceDocument {
   out.pages = d.pages ?? false;
   out.serves = d.serves;
   out.publications = d.publications.map((p) => {
-    const q: typeof p = { target: p.target, name: p.name, description: p.description, tags: p.tags, collection: p.collection };
+    const q = { target: p.target } as typeof p;
     if (p.by !== undefined) q.by = p.by;
+    q.name = p.name;
+    q.description = p.description;
+    q.tags = p.tags;
+    q.collection = p.collection;
     return q;
   });
   out.introductions = d.introductions;
@@ -1588,6 +1610,8 @@ export function writePlan(plan: BuildPlan, outDir: string): void {
 
 Run: `npm run check && npm test`
 Expected: all pass. If the `serves.length` is not 26, compare against `appearances` over the clean store: the three selections contain 23 further documents.
+
+Note (added at execution): the review of Task 8 found that a publication's `by` was written last instead of second; the code above is the corrected form, with the 1 MB refusal now tested.
 
 - [ ] **Step 6: Commit**
 
