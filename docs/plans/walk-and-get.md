@@ -23,8 +23,8 @@ From `docs/design.md`; every task's requirements include these, and the step 1 p
 - **Limits** (walk and `get`): one request 10 s from before name resolution to the last byte; one file 1 MB; nesting depth 64; 16 paths of at most 256 characters per definition; 50 definitions fetched from one source in SAID order; 10 introductions followed from one source in address order; introduction depth 3; 50 sources per run; 60 s and 20 MB per host; 8 hosts in flight, one request at a time per host; 120 s for the run. Constants in one module. A count limit cuts in a fixed order and the source is recorded `truncated` with the limit's name. A source whose host uses up its time or bytes is dropped whole and sources on that host not yet started are `skipped`; nothing partial is kept because a clock ran out.
 - **Outcomes**, exactly one per address tried: `ok`, `truncated`, `not-found` (404 or 410), `unreachable` (no answer, TLS failure, 5xx), `timed-out`, `redirected`, `refused-address`, `disallowed` (catalog build only; not produced here), `invalid` (wrong content type, a content encoding, not JSON, too large, too deep, a known member of the wrong type, another 4xx, a `source` that does not match), `skipped`. Per definition: `verified`, `failed-check`, `not-contained`, or the fetch outcome. Per `for` introduction with nothing at the end: `not-there`.
 - **Reading a source document:** `source` must equal the address it was fetched from, else the document is `invalid` and nothing is read from it; a known member of the wrong type discards the document; an unknown member is ignored, inside a publication too; an entry whose SAID or address fails its rule is dropped and counted; a publication that breaks a limit is dropped and counted. Lists come out sorted and without duplicates; a duplicate is dropped and counted.
-- **The walk** is breadth-first: every source at one depth before any at the next. Within a depth, introductions that name the SAID in `for` come first; among equals, one introduction from each introducing source in turn, introducing sources in address order and each source's introductions in address order. Visited addresses are remembered. The walk never sends a SAID to a source that does not list it (the source document is fetched whole and matched locally). It keeps nothing between runs. The report is one ASCII-only JSON document. Two readings this plan fixes where the design leaves room: `not-there` is judged on what the source document lists and carries (a listed definition that fails is `failed-check` or `not-contained`, not `not-there`); and the ten introductions followed from one source are the first ten listed in address order, visited or not, so a source cannot be cut short by its own duplicates but is not given extra room for them either.
-- **`get`** reads the starting source and the sources its introductions name, one step and no further; each SAID is fetched from the first source that lists it in `serves` (the starting source first, then the introduced sources in address order); it works outward from the SAID asked for, taking appearances in sorted order, checks each definition and writes `<SAID>.json`, nothing else, so the folder is `build`'s input shape. A SAID that no read source lists is `missing` and is requested from nobody. Readings this plan fixes, each marked for the stress test: the SAID asked for may itself come from an introduced source when the start does not list it (the design's `get` prose; its Tests line reads as the start-only case); a failed check at the first lister is not retried at the next; a lister that has reached `definitionsPerSource` no longer counts as listing, the next lister is tried, and the lister is `truncated`; an introduced source on a host already used up is `skipped` with the limit's name; and a source whose host is used up after it supplied files keeps those files (each is verified on its own) and gets one `timed-out` entry. That last reading departs from the design's sentence "a run never keeps part of a source because the clock ran out", which this plan takes as being about a walk's or catalog's account of a source; the maintainer decides.
+- **The walk** is breadth-first: every source at one depth before any at the next. Within a depth, introductions that name the SAID in `for` come first; among equals, one introduction from each introducing source in turn, introducing sources in address order and each source's introductions in address order. Visited addresses are remembered. The walk never sends a SAID to a source that does not list it (the source document is fetched whole and matched locally). It keeps nothing between runs. The report is one ASCII-only JSON document; it carries a `sources` list, one entry per source read in visit order, with the chain that led there and the operator's stated `by` and `oobi` when the document states them, and `reached` is that list's length (stress test, 2026-11-10). Two readings settled at the stress test: `not-there` is judged on what the source document lists and carries (a listed definition that fails is `failed-check` or `not-contained`, not `not-there`); and the ten introductions followed from one source are the first ten listed in address order, visited or not, so a source cannot be cut short by its own duplicates but is not given extra room for them either.
+- **`get`** reads the starting source and the sources its introductions name, one step and no further; each SAID is fetched from the first source that lists it in `serves` (the starting source first, then the introduced sources in address order); it works outward from the SAID asked for, taking appearances in sorted order, checks each definition and writes `<SAID>.json`, nothing else, so the folder is `build`'s input shape. A SAID that no read source lists is `missing` and is requested from nobody. Settled at the stress test (2026-11-10) and written into the design: the SAID asked for may itself come from an introduced source when the start does not list it; a failed check at the first lister is not retried at the next; a lister that has reached `definitionsPerSource` no longer counts as listing, the next lister is tried, and the lister is `truncated`; an introduced source on a host already used up is `skipped` with the limit's name; and a source whose host is used up after it supplied files keeps those files, because a verified file is its own account, and gets one `timed-out` entry.
 - **Commands** print JSON on standard output, ASCII-only, exit 0 success, 1 failure, 2 usage. `who` exits 1 only when the starting source cannot be read; `get` writes nothing and exits 1 when the starting source cannot be read or the definition asked for was not fetched and verified; `verify` exits 1 when the bytes fail or the fetch is refused. `--out` must be absent or empty and is checked before any request.
 - Strangers' text: every string from a source appears in the report only as a JSON string, escaped to ASCII by `asciiJson`; the tool's own messages never embed one. Nothing from the network is ever a file name except a SAID that passed the pattern.
 - Tests: no outside network. Three local origins stand for three hosts. Every hostile case in the design's "Hostile sources" list that concerns fetching, reading or the walk is a test here and ends in a named outcome, never a crash or a hang. Tests that wait on a timeout set small limits through the limits parameter, never the real ones.
@@ -270,7 +270,8 @@ git commit -m "feat: the limits in one module, and the public-address check (<be
 ### Task 2: The fetch routine
 
 **Files:**
-- Create: `src/fetch.ts`, `tests/fetch.test.ts`, `tests/helpers/servers.ts`, `tests/helpers/fetch-child.ts`
+- Create: `src/fetch.ts`, `tests/fetch.test.ts`, `tests/helpers/servers.ts`, `tests/helpers/fetch-child.ts`, `fixtures/tls/cert.pem`, `fixtures/tls/key.pem`
+- Modify: `fixtures/README.md` (the TLS fixture's provenance)
 
 **Interfaces:**
 - Consumes: `parseHttpsAddress(s, opts)` and `AddressOptions` from `src/address.ts`; `isPublic`, `isLoopback`, `parseIPv4` from `src/ip.ts`.
@@ -282,7 +283,16 @@ git commit -m "feat: the limits in one module, and the public-address check (<be
 - Resolution: the name is resolved exactly once per request through the `resolve` given; when any answer is not public (outside test) the outcome is `refused-address` and the server sees no request; when the resolver never answers the outcome is `timed-out` at the limit; when the resolver rejects, `unreachable`; the socket connects to the first checked answer: under test, `a.test` resolved to `127.0.0.1` reaches the local server, and a second answer of `203.0.113.1` is never consulted.
 - A child process with `NODE_USE_ENV_PROXY=1` and `HTTP_PROXY`/`HTTPS_PROXY` set to a closed port reaches the local server through `fetchJson` and fails through `http.globalAgent`.
 - Every request carries `accept-encoding: identity`, `user-agent: mad-discovery (+https://github.com/seriouscoderone/mad-discovery)`, no `cookie` and no `referer`.
-- No TLS server runs in the tests; `rejectUnauthorized: true` is read in review, and a TLS failure maps to `unreachable` through the request's `error` event like any connection failure.
+- A certificate no authority signed is `unreachable`, and stays `unreachable` in a child process started with `NODE_TLS_REJECT_UNAUTHORIZED=0`, while the control, a plain `https.request` with the option left to its default, succeeds in that child: the explicit `rejectUnauthorized: true` wins over the environment (checked on this machine: Node takes the variable only as the default). No test trusts a certificate authority of ours; there is no positive TLS case by design.
+
+- [ ] **Step 0: Make the TLS fixture, once**
+
+```bash
+mkdir -p fixtures/tls
+openssl req -x509 -newkey rsa:2048 -nodes -keyout fixtures/tls/key.pem -out fixtures/tls/cert.pem -days 36500 -subj "/CN=mad-discovery test" -addext "subjectAltName=IP:127.0.0.1"
+```
+
+Add to `fixtures/README.md`, as a new list item: "`tls/cert.pem`, `tls/key.pem`: a self-signed certificate for 127.0.0.1, made once with `openssl req -x509 -newkey rsa:2048 -nodes -days 36500 -subj "/CN=mad-discovery test" -addext "subjectAltName=IP:127.0.0.1"`. Nothing trusts it: the tests use it to show that the fetch routine refuses a certificate no authority signed, with or without `NODE_TLS_REJECT_UNAUTHORIZED=0` in the environment. The private key is public by design and protects nothing." `.gitattributes` already covers `fixtures/**`.
 
 - [ ] **Step 1: Write the test server helper**
 
@@ -290,7 +300,11 @@ git commit -m "feat: the limits in one module, and the public-address check (<be
 
 ```ts
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer as createSecureServer, type Server as SecureServer } from "node:https";
+import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
+
+const TLS = (file: string) => new URL(`../../fixtures/tls/${file}`, import.meta.url);
 
 const TYPES: Record<string, string> = { ".json": "application/json", ".html": "text/html; charset=utf-8", ".css": "text/css", ".xml": "application/xml" };
 
@@ -300,19 +314,20 @@ export class Origin {
   readonly requests: string[] = [];
   /** Answers the request itself and returns true, or returns false to let the file map answer. */
   behave: ((req: IncomingMessage, res: ServerResponse) => boolean) | null = null;
-  readonly server: Server;
+  readonly server: Server | SecureServer;
   readonly origin: string;
   // Not parameter properties: erasableSyntaxOnly and Node's strip-only mode both refuse those.
-  private constructor(server: Server, origin: string) {
+  private constructor(server: Server | SecureServer, origin: string) {
     this.server = server;
     this.origin = origin;
   }
 
-  static async start(): Promise<Origin> {
-    const server = createServer();
+  /** Plain http by default; secure serves the self-signed fixture, which nothing trusts, for the tests that expect a refusal. */
+  static async start(secure = false): Promise<Origin> {
+    const server = secure ? createSecureServer({ cert: readFileSync(TLS("cert.pem")), key: readFileSync(TLS("key.pem")) }) : createServer();
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     const { port } = server.address() as AddressInfo;
-    const o = new Origin(server, `http://127.0.0.1:${port}`);
+    const o = new Origin(server, `${secure ? "https" : "http"}://127.0.0.1:${port}`);
     server.on("request", (req, res) => o.answer(req, res));
     return o;
   }
@@ -499,19 +514,44 @@ test("proxy settings in the environment are ignored by the routine and obeyed by
   assert.equal((await run("routine")).outcome, "ok");
   assert.equal((await run("global")).outcome, "error", "the control: the global agent went to the proxy and failed");
 });
+
+test("a certificate no authority signed is unreachable, and the environment cannot turn the check off", async () => {
+  const secure = await Origin.start(true);
+  try {
+    secure.put("x.json", "{}");
+    const address = `${secure.origin}/x.json`;
+    assert.equal((await fetchJson(address, quick)).outcome, "unreachable", "self-signed: refused");
+    const child = fileURLToPath(new URL("./helpers/fetch-child.ts", import.meta.url));
+    const env = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: "0" };
+    const run = async (mode: string) => JSON.parse((await promisify(execFile)(process.execPath, [child, mode, address], { env })).stdout) as { outcome: string };
+    assert.equal((await run("lax")).outcome, "ok", "the control: with the option left to its default, the variable turns the check off");
+    assert.equal((await run("routine")).outcome, "unreachable", "the routine's explicit rejectUnauthorized: true wins over the variable");
+  } finally { await secure.close(); }
+});
 ```
 
 `tests/helpers/fetch-child.ts`:
 
 ```ts
-// Runs in a child process so that NODE_USE_ENV_PROXY, read at startup, is in force. "routine" uses fetchJson; "global" is the control.
+// Runs in a child process so that NODE_USE_ENV_PROXY and NODE_TLS_REJECT_UNAUTHORIZED, read at startup, are in force.
+// "routine" uses fetchJson; "global" (the proxy control) and "lax" (the TLS control) show the environment did take effect.
 import http from "node:http";
+import https from "node:https";
 import { fetchJson } from "../../src/fetch.ts";
 
 const [mode, address] = process.argv.slice(2) as [string, string];
 if (mode === "routine") {
   const r = await fetchJson(address, { test: true, timeoutMs: 3000, maxBytes: 1_000_000, resolve: async () => ["127.0.0.1"] });
   process.stdout.write(JSON.stringify({ outcome: r.outcome }));
+} else if (mode === "lax") {
+  // The TLS control: a plain https request with rejectUnauthorized left to its default, which NODE_TLS_REJECT_UNAUTHORIZED=0 turns off.
+  const url = new URL(address);
+  const outcome = await new Promise<string>((resolve) => {
+    const req = https.request({ hostname: url.hostname, port: url.port, path: url.pathname, agent: new https.Agent({ keepAlive: false }) }, (res) => { res.resume(); res.on("end", () => resolve("ok")); });
+    req.on("error", () => resolve("error"));
+    req.end();
+  });
+  process.stdout.write(JSON.stringify({ outcome }));
 } else {
   const url = new URL(address);
   const outcome = await new Promise<string>((resolve) => {
@@ -693,7 +733,7 @@ Run: `npm test`
 Expected: all pass.
 
 ```bash
-git add src/fetch.ts tests/fetch.test.ts tests/helpers/servers.ts tests/helpers/fetch-child.ts
+git add src/fetch.ts tests/fetch.test.ts tests/helpers/servers.ts tests/helpers/fetch-child.ts fixtures/tls/cert.pem fixtures/tls/key.pem fixtures/README.md
 git commit -m "feat: the fetch routine: resolve once, check, connect to the checked address, named outcomes (<bead id>)"
 ```
 
@@ -1174,10 +1214,10 @@ git commit -m "feat: one run's budgets: the run clock, each host's time and byte
 
 **Interfaces:**
 - Consumes: `Session`; `readSourceDocument`; `checkSaid`; `paths` from `src/scan.ts`; `definitionAddress`, `parseSourceAddress`; `Outcome`; `Publication`, `Introduction`, `SourceDocument`.
-- Produces: in `src/read.ts`: `type Reason = Outcome | "failed-check" | "not-contained" | "not-there"`; `type Unresolved = { address: string; via: string[]; reason: Reason; said?: string; limit?: string; target?: string }`; `type ReadSource = { ok: true; document: SourceDocument; base: string; dropped: Dropped } | { ok: false; unresolved: Unresolved }`; `readSource(address: string, via: string[], session: Session): Promise<ReadSource>`; `redirectTarget(f: Fetched): { target: string } | {}`. In `src/walk.ts`: `type Report = { said; from; serves: { source; via }[]; publications: { source; via; publication: Publication }[]; referrers: { source; via; said; paths: string[]; appearances: number }[]; unresolved: Unresolved[]; dropped: { source; entries; publications }[]; catalogs: string[]; reached: number }`; `type Candidate = { address: string; via: string[]; named: boolean }`; `type Visited = { address; via; fetched: boolean; read: boolean; serves: boolean; publications: Publication[]; referrers: { said; paths; appearances }[]; unresolved: Unresolved[]; dropped: Dropped | null; catalogs: string[]; introductions: Introduction[] }` (`fetched`: the document was fetched and read; `read`: the source is kept, ok or truncated); `visitSource(said: string, c: Candidate, session: Session): Promise<Visited>`; `type WalkOutcome = { ok: true; report: Report } | { ok: false; reason: Reason; target?: string }`; `walk(said: string, from: string, session: Session): Promise<WalkOutcome>` (this task: the starting source only, no introductions followed; Task 6 adds the levels). In `tests/helpers/servers.ts`: `Origin.source(prefix: string, config: Record<string, unknown>, inputs: Inputs): { address: string; plan: BuildPlan }`.
+- Produces: in `src/read.ts`: `type Reason = Outcome | "failed-check" | "not-contained" | "not-there"`; `type Unresolved = { address: string; via: string[]; reason: Reason; said?: string; limit?: string; target?: string }`; `type ReadSource = { ok: true; document: SourceDocument; base: string; dropped: Dropped } | { ok: false; unresolved: Unresolved }`; `readSource(address: string, via: string[], session: Session): Promise<ReadSource>`; `redirectTarget(f: Fetched): { target: string } | {}`. In `src/walk.ts`: `type Report = { said; from; sources: { address; via; by?; oobi? }[]; serves: { source; via }[]; publications: { source; via; publication: Publication }[]; referrers: { source; via; said; paths: string[]; appearances: number }[]; unresolved: Unresolved[]; dropped: { source; entries; publications }[]; catalogs: string[]; reached: number }`; `type Candidate = { address: string; via: string[]; named: boolean }`; `type Visited = { address; via; fetched: boolean; read: boolean; serves: boolean; publications: Publication[]; referrers: { said; paths; appearances }[]; unresolved: Unresolved[]; dropped: Dropped | null; catalogs: string[]; introductions: Introduction[] }` (`fetched`: the document was fetched and read; `read`: the source is kept, ok or truncated); `visitSource(said: string, c: Candidate, session: Session): Promise<Visited>`; `type WalkOutcome = { ok: true; report: Report } | { ok: false; reason: Reason; target?: string }`; `walk(said: string, from: string, session: Session): Promise<WalkOutcome>` (this task: the starting source only, no introductions followed; Task 6 adds the levels). In `tests/helpers/servers.ts`: `Origin.source(prefix: string, config: Record<string, unknown>, inputs: Inputs): { address: string; plan: BuildPlan }`.
 
 **Acceptance Criteria:**
-- Over one local origin serving a gym build: `who X` where X is a leaf definition lists the source under `serves` with `via: []`, its publications of X, and every served definition whose bytes contain X as a referrer with the paths and count the scan gives; `reached` is 1; `unresolved` and `dropped` are empty; `catalogs` repeats the document's.
+- Over one local origin serving a gym build: `who X` where X is a leaf definition lists the source under `serves` with `via: []`, its publications of X, and every served definition whose bytes contain X as a referrer with the paths and count the scan gives; `sources` lists the one source with its chain and the `by` and `oobi` its document states; `reached` is 1; `unresolved` and `dropped` are empty; `catalogs` repeats the document's.
 - A source that lists X and serves other bytes for it: `failed-check` with `said` X and not in `serves`. A `refers` naming X that the bytes do not contain: `not-contained`. A definition answered with 404: `not-found` with `said`; with `text/plain`: `invalid` with `said`. A redirect on a definition: `redirected` with `said` and `target`. A source document that is a copy from another origin: `invalid` and nothing read. A source reached through an introduction `for` X with nothing about X: `not-there` (the code is here; the test is Task 6's, which follows introductions).
 - A definition nested 100,000 deep is verified and reported with its count and no paths; one holding X 10,000 times is reported with 16 paths; one near 1 MB holding X 10,000 times under a 500,000-character key is reported with the count and no paths.
 - The definitions limit cuts in SAID order and records `truncated` with `limit: "definitions"`; what was fetched stays.
@@ -1239,7 +1279,7 @@ const definition = (inner: string[], filler = ""): { said: string; bytes: Uint8A
 
 test("one source: serves, publications and referrers of a leaf definition, nothing else asked for", async () => {
   const a = await start();
-  const { address, plan } = a.source("mad/", { serve: [SELECTION], publications: [publication(SELECTION, "class-brick")], catalogs: ["https://c.example/catalog.json"] }, inputs);
+  const { address, plan } = a.source("mad/", { serve: [SELECTION], by: "EKxyAID", oobi: "https://gym.example/oobi/EKxyAID", publications: [publication(SELECTION, "class-brick")], catalogs: ["https://c.example/catalog.json"] }, inputs);
   const leaf = plan.document.serves.find((s) => s.refers.length === 0)!.said;
   const containing = plan.document.serves.filter((s) => s.refers.includes(leaf)).map((s) => s.said);
   assert.ok(containing.length > 0, "the fixture has a definition that contains the leaf");
@@ -1251,6 +1291,7 @@ test("one source: serves, publications and referrers of a leaf definition, nothi
   const r = await walk(leaf, address, session());
   assert.ok(r.ok);
   if (!r.ok) return;
+  assert.deepEqual(r.report.sources, [{ address, via: [], by: "EKxyAID", oobi: "https://gym.example/oobi/EKxyAID" }], "the source read, with what its operator states");
   assert.deepEqual(r.report.serves, [{ source: address, via: [] }]);
   assert.deepEqual(r.report.publications.map((p) => p.publication.name), ["the leaf"]);
   assert.deepEqual(r.report.referrers.map((x) => x.said), containing);
@@ -1448,6 +1489,7 @@ import type { Introduction, Publication } from "./source.ts";
 export type Report = {
   said: string;
   from: string;
+  sources: { address: string; via: string[]; by?: string; oobi?: string }[];   // every source read, in visit order; by and oobi as stated, never verified
   serves: { source: string; via: string[] }[];
   publications: { source: string; via: string[]; publication: Publication }[];
   referrers: { source: string; via: string[]; said: string; paths: string[]; appearances: number }[];
@@ -1466,6 +1508,8 @@ export type Visited = {
   via: string[];
   fetched: boolean;   // the source document was fetched and read; false when the document itself could not be
   read: boolean;      // the source was read in full and is kept: ok or truncated
+  by?: string;        // the operator's stated AID, when the document states one
+  oobi?: string;      // where that AID resolves, when stated; shown, never fetched
   serves: boolean;
   publications: Publication[];
   referrers: { said: string; paths: string[]; appearances: number }[];
@@ -1512,6 +1556,8 @@ export async function visitSource(said: string, c: Candidate, session: Session):
   if (session.exhausted(host) !== null) return { ...fresh(c), fetched: true, unresolved: [{ address: c.address, via: c.via, reason: "timed-out" }] };
 
   v.read = true;
+  if (document.by !== undefined) v.by = document.by;
+  if (document.oobi !== undefined) v.oobi = document.oobi;
   if (wanted.length > taken.length) unresolved("truncated", { limit: "definitions" });
   v.publications = document.publications.filter((p) => p.target === said);
   if (dropped.entries > 0 || dropped.publications > 0) v.dropped = dropped;
@@ -1525,16 +1571,18 @@ export async function visitSource(said: string, c: Candidate, session: Session):
 
 /** The report from every visit, in the order visited: depth, then address. */
 export function assemble(said: string, from: string, visits: Visited[], skipped: Unresolved[]): Report {
+  const read = visits.filter((v) => v.read);
   return {
     said,
     from,
+    sources: read.map((v) => ({ address: v.address, via: v.via, ...(v.by !== undefined ? { by: v.by } : {}), ...(v.oobi !== undefined ? { oobi: v.oobi } : {}) })),
     serves: visits.filter((v) => v.serves).map((v) => ({ source: v.address, via: v.via })),
     publications: visits.flatMap((v) => v.publications.map((publication) => ({ source: v.address, via: v.via, publication }))),
     referrers: visits.flatMap((v) => v.referrers.map((r) => ({ source: v.address, via: v.via, ...r }))),
     unresolved: [...visits.flatMap((v) => v.unresolved), ...skipped],
     dropped: visits.filter((v) => v.dropped !== null).map((v) => ({ source: v.address, ...v.dropped! })),
     catalogs: [...new Set(visits.flatMap((v) => v.catalogs))].sort(),
-    reached: visits.filter((v) => v.read).length,
+    reached: read.length,
   };
 }
 
@@ -1573,7 +1621,7 @@ git commit -m "feat: the walk over one source: serves, publications, referrers, 
 - Produces: `nextLevel(said: string, here: Visited[], visited: Set<string>): Candidate[]` (exported for its own test); `walk` now follows introductions to the depth and source limits.
 
 **Acceptance Criteria:**
-- Three local origins, the first introducing the second and the second the third: `who X --from A` lists all three under `serves`, with `via` `[]`, `[A]`, `[A, B]`, `reached` 3, every source visited once (each origin's log holds one `source.json` request).
+- Three local origins, the first introducing the second and the second the third: `who X --from A` lists all three under `serves` and under `sources`, with `via` `[]`, `[A]`, `[A, B]`, `reached` 3, every source visited once (each origin's log holds one `source.json` request).
 - A cycle (C introduces A) ends with each source visited once and no entry for it.
 - Order within a depth: introductions `for` X come before the others; among equals one from each introducing source in turn, introducing sources in address order, each source's introductions in address order; a source that introduces ten dead addresses sorting ahead of the honest ones does not keep the honest one introduced beside it from being visited when the source limit bites.
 - The depth limit: introductions from a source at the depth limit are `skipped` with `limit: "depth"`; the source limit: candidates beyond the room are `skipped` with `limit: "sources"`; more than `introductionsPerSource` introductions from one source: the first N in address order are followed and the source gets one `truncated` entry with `limit: "introductions"`.
@@ -1594,6 +1642,7 @@ test("three origins: the first introduces the second, the second the third; one 
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.deepEqual(r.report.serves, [{ source: aAddr, via: [] }, { source: bAddr, via: [aAddr] }, { source: cAddr, via: [aAddr, bAddr] }]);
+  assert.deepEqual(r.report.sources, [{ address: aAddr, via: [] }, { address: bAddr, via: [aAddr] }, { address: cAddr, via: [aAddr, bAddr] }], "no by or oobi: none stated");
   assert.equal(r.report.reached, 3);
   assert.deepEqual(r.report.unresolved, []);
   for (const o of [a, b, c]) assert.equal(o.requests.filter((p) => p === "mad/source.json").length, 1);
@@ -2110,7 +2159,7 @@ export async function get(said: string, from: string, session: Session): Promise
 }
 ```
 
-What the design fixes and the code follows: a SAID is fetched from the first listing source, the start first and then the introduced sources in address order, and a failed check there is not retried at the next (the entry says where it failed). What this plan adds, for the maintainer to confirm at the stress test (also stated under Global Constraints, `get`): a lister at its definitions limit no longer counts as listing; the SAID asked for may come from an introduced source; an introduced source on a used-up host is `skipped`; a source whose host is used up after it supplied files keeps those files and gets one `timed-out` entry, which departs from the design's "never keeps part of a source" sentence on the reading that the sentence is about a walk's or a catalog's account of a source, not about files that verify on their own.
+What the design fixes and the code follows: a SAID is fetched from the first listing source, the start first and then the introduced sources in address order, and a failed check there is not retried at the next (the entry says where it failed). What this plan added and the maintainer confirmed at the stress test (2026-11-10), now in the design too: a lister at its definitions limit no longer counts as listing; the SAID asked for may come from an introduced source; an introduced source on a used-up host is `skipped`; a source whose host is used up after it supplied files keeps those files and gets one `timed-out` entry, because a verified file is its own account, where a walk's row about a source is not.
 
 - [ ] **Step 4: Run the tests and the type check**
 
@@ -2507,12 +2556,45 @@ cd /Users/seriouscoderone/code/bpm && git add CLAUDE.md && git commit -m "docs: 
 
 **Spec coverage.** Design, "Fetching safely": HTTPS/443/DNS only (fetch, address rule); redirects not followed (fetch); check on the connection with own agent and own lookup, not the global agent, not `fetch` (fetch); refused ranges incl. mapped and NAT64 (ip); cancellable resolver (fetch, `resolveNames`); bytes on the wire, no encoding, size while reading (fetch); JSON content types (fetch); the tool's name (fetch); test opt-in through one parameter (address rule from step 1, fetch, session, cli `RunOptions`); proxies ignored (fetch, tested in a child). Limits table, walk column: every row in `WALK` (limits) and applied in session (request, file, host time, host bytes, hosts in flight, run) and walk/get (definitions, introductions, depth, sources); depth 64 and paths 16/256 stay in `PATH_LIMITS`, used by `parseBounded` (document) and `paths` (walk). Outcomes: every name produced except `disallowed`, which is the catalog build's. Per-definition `verified`/`failed-check`/`not-contained` and `not-there` (walk). "A source": every reading rule (document). "The walk": steps 1 to 5, breadth-first, order within a depth, cycles, the report's members except `catalog` (with `--catalog`, second epic), `via`, `reached`, keeps nothing, ASCII-only, never sends a SAID to a source that does not list it (walk, cli). "Bringing a definition home": all of it (get, cli). "The tool": the four commands, exit codes, `--out` rule, `verify` requires the SAID. "Tests", Walk: three origins, cycle, and every listed unresolved case (walk tests). Get: the four cases (get tests). Hostile sources: public-then-loopback (fetch: resolved once, second answer unused), never answers (fetch), IP literal (fetch), NAT64 accepted (ip), gzip (fetch), one byte per second (fetch), `../../x` (document), 100,000 deep source document (document), `__proto__`/`constructor` (document), flood sorting ahead (walk), 100,000-deep definition verified and reported without paths (walk), a definition holding a SAID 10,000 times with the paths cut at 16 (walk; the design's long key is replaced by an array, which exercises the same cut and keeps the pointers checkable), proxy variables (fetch child), 100,000-character description (document), escape sequences in a name (document; cli asserts ASCII output). Nothing in the design's lists for this step is left out.
 
-**A gap inside the design, carried as is.** "Introductions" says the reader records, for each introduction, the address of the source document it was found in "and that source's `by` when it states one"; "A source" says the tool stores and shows `oobi`; "Publications" says a publication without `by` takes the source document's. The report JSON in "The walk" has no slot for a visited source's `by` or `oobi`, and this plan writes that JSON exactly, so a source's stated AID appears nowhere in a walk's report. Nothing is added until the maintainer rules; the stress test raises it (recommendation there: a `sources` list of the sources read, each with `address`, `via`, `by` and `oobi` when stated, which also makes `reached` its length).
+**A gap inside the design, closed at the stress test.** "Introductions" says the reader records, for each introduction, the address of the source document it was found in "and that source's `by` when it states one"; "A source" says the tool stores and shows `oobi`; "Publications" says a publication without `by` takes the source document's. The report JSON in "The walk" had no slot for a visited source's `by` or `oobi`. The maintainer agreed (2026-11-10) to the `sources` list: one entry per source read, with `address`, `via`, and `by` and `oobi` when stated, never verified; `reached` is its length; a publication without its own `by` is attributed, by its `source` address, to that list's entry. The design's report carries it now.
 
-**Dry run.** The whole plan was executed twice in scratch copies of the repository before it was presented (2026-11-09): every task's code and tests applied, `npm run check` and `npm test` run after each. The first run's ten findings, and the seventeen of a parallel reading of the plan against the design, were folded into the text; the four that would have blocked execution were parameter properties in a class (refused by `erasableSyntaxOnly` and by Node), the pages re-parsing introduction addresses without the test option, a control character in a configuration that `parseConfig` refuses, and a test that needed a later task's code. The second run, over the corrected text, applied Tasks 1 to 7 exactly as written, found one defect in Task 8's test (a raw control character inside a JSON string is not JSON; the wire carries the six-character escape, fixed above) and ended at 105 tests passing in about 1.3 s, with a preloaded hook across all 31 processes (test files, the proxy children and the `bin` spawns) confirming that every connection went to 127.0.0.1, no call reached the real resolver and nothing called the built-in `fetch`.
+**Dry run.** The whole plan was executed twice in scratch copies of the repository before it was presented (2026-11-09): every task's code and tests applied, `npm run check` and `npm test` run after each. The first run's ten findings, and the seventeen of a parallel reading of the plan against the design, were folded into the text; the four that would have blocked execution were parameter properties in a class (refused by `erasableSyntaxOnly` and by Node), the pages re-parsing introduction addresses without the test option, a control character in a configuration that `parseConfig` refuses, and a test that needed a later task's code. The second run, over the corrected text, applied Tasks 1 to 7 exactly as written, found one defect in Task 8's test (a raw control character inside a JSON string is not JSON; the wire carries the six-character escape, fixed above) and ended at 105 tests passing in about 1.3 s, with a preloaded hook across all 31 processes (test files, the proxy children and the `bin` spawns) confirming that every connection went to 127.0.0.1, no call reached the real resolver and nothing called the built-in `fetch`. Two additions came after that run, from the stress test: the report's `sources` list (Tasks 5 and 6) and the TLS fixture with its two tests (Task 2); the TLS claim they rest on was checked by hand against a self-signed local server, and they are otherwise exercised at execution.
 
 **Placeholders.** `<bead id>` in commit messages is filled by the orchestrator from the bead it creates for the task; `<date>` in Task 9 step 4 is the execution date. No other.
 
 **Type consistency.** `Fetched`, `Resolve`, `Outcome` (fetch) are used by session, read, walk, get, cli as declared. `Unresolved`/`Reason` live in `read.ts` and are imported by walk, get, cli. `Session.hostOf`, `exhausted`, `fetch`, `each`, `test`, `limits` as declared in Task 4 and used in 5-8. `Origin.source` is added in Task 5 and used in 5-8; Task 2's tests use only `put`, `behave`, `files`, `requests`. `writeFiles` replaces `writePlan` in Task 8 and the build test is updated there. `readSourceDocument` returns `document` with `pages` always present; `plan.document` from `build` also always sets `pages: true`, so the Task 3 round-trip holds.
 
 **Scope check.** One subsystem: the network side of one package. No catalog, no finder, no hosting, no AWS.
+
+## Stress Test Results: the step 2 plan
+
+Run on 2026-11-10 with the maintainer, after he approved the plan. Nine branches, one at a time, each with a recommendation; he agreed with seven as recommended and two changed the plan.
+
+### Resolved decisions
+
+- **`get` after a host's budget runs out.** Keeps every definition already verified from that host, supplies nothing more from it, and records one `timed-out` entry for the source. The design's "never keeps part of a source" sentence is about a walk's or a catalog's account of a source; a verified file is its own account. Written into the design. Agreed; the maintainer added that the content-addressed space invites a class of efficiency algorithms, deduplication first.
+- **Which source supplies a SAID in `get`.** The SAID asked for may come from an introduced source when the start does not list it; a lister at its definitions limit no longer counts as listing and the next lister is tried, the cut lister recorded `truncated`. The design's Tests sentence for `get` now reads "neither the starting source nor a source it introduces". Agreed.
+- **`not-there`.** Judged on what the introduced source's document lists and carries; a listed definition that fails is `failed-check` or `not-contained` and not also `not-there`. The design's Outcomes sentence now says so. Agreed.
+- **Counting the ten introductions.** The first ten listed in address order, visited or not. The design's limits row now says "visited or not". Agreed.
+- **An unknown member inside a stranger's publication.** The reader ignores it; the operator's configuration keeps refusing one. The design's reading rule now says "inside a publication too". Agreed.
+- **A source's stated `by` and `oobi` in the report.** The report gains `sources`: one entry per source read, in visit order, with `address`, `via`, and `by` and `oobi` when the document states them, never verified; `reached` is its length; a publication without its own `by` is attributed by its `source` address to that entry. Added to Tasks 5 and 6 and to the design's report. Modified.
+- **`Content-Encoding: identity`.** Accepted, as the name of no encoding; every other value refused. The design's sentence now carries the exception. Agreed.
+- **`who --catalog`.** Refused with a usage message until the second epic writes the catalog's per-SAID files. Agreed.
+- **Security and risk.** The controls hold as planned (resolve once, check every answer, connect only to the checked address through our own agent and `lookup`; no redirect followed; encodings refused; size cut while reading; proxy settings ignored, proven against the global agent as a control; file names only from SAIDs that matched the pattern; every string through `asciiJson`; `--out` checked before the first request; `oobi` and `catalogs` never fetched; the `test` option a parameter only). One gap closed: Task 2 gains a self-signed certificate fixture and two tests, a fetch from it ending `unreachable`, and a child started with `NODE_TLS_REJECT_UNAUTHORIZED=0` still ending `unreachable` while a plain request in that child succeeds, which proves the explicit option wins over the environment (checked on this machine before it was written in). Modified.
+
+### Changes made
+
+- Task 2: `fixtures/tls/cert.pem` and `key.pem` made once with `openssl`, recorded in `fixtures/README.md`; `Origin.start(secure)`; the `lax` control mode in `fetch-child.ts`; the TLS test; the acceptance criterion that said no TLS server runs replaced.
+- Tasks 5 and 6: `Report.sources`, `Visited.by` and `Visited.oobi`, `assemble` building `sources` and taking `reached` from it; assertions in the one-source and three-origins tests; acceptance criteria.
+- Global Constraints and the Task 7 note: the `get` and walk readings stated as settled rather than pending.
+- `docs/design.md`: the seven clauses above written in, and a dated note under its stress-test section.
+
+### Deferred / parking lot
+
+- Across runs, "I already hold this SAID, do not fetch it": the store's half (bpm-core's pull bpm-n13.3, MAD's import bpm-upm.21), where the folder of `<SAID>.json` files is the index; the maintainer's note on content-addressed efficiencies lands there first.
+- A reader behind a proxy cannot walk; and `get`'s worst-case memory is the limits' product (up to 11 sources times 50 definitions times 1 MB held before writing). Both are the design's choices, named here, to revisit if real sources approach them.
+
+### Confidence assessment
+
+- Overall: high. The plan was dry-run twice to a passing suite before the stress test; the two additions are small and the one factual claim behind them was checked by hand.
+- Areas of concern: the `sources` list is the first change to the report's shape since the design; it is the right place for stated AIDs but is untested against a stranger's reading, like every format here. The TLS tests spawn children with an environment variable that turns validation off; they exist to prove the routine ignores it, and the fixture key trusts nothing.
