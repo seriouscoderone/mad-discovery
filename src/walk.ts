@@ -106,12 +106,73 @@ export function assemble(said: string, from: string, visits: Visited[], skipped:
   };
 }
 
-/** The walk from one source. In this task it visits the starting source only; following introductions arrives with Task 6. */
-export async function walk(said: string, from: string, session: Session): Promise<WalkOutcome> {
-  const start = await visitSource(said, { address: from, via: [], named: false }, session);
-  if (!start.fetched) {
-    const u = start.unresolved[0]!;
-    return { ok: false, reason: u.reason, ...(u.target !== undefined ? { target: u.target } : {}) };
+/**
+ * The next depth's candidates in the design's order: introductions that name the SAID in `for` first; among equals one from each
+ * introducing source in turn, introducing sources in address order (here is sorted) and each source's introductions in address
+ * order (the document reader sorted them). An address already visited, or taken earlier in this level, is not taken again.
+ */
+export function nextLevel(said: string, here: Visited[], visited: Set<string>): Candidate[] {
+  const named: Candidate[][] = [];
+  const others: Candidate[][] = [];
+  for (const v of here) {
+    if (!v.read) continue;
+    const via = [...v.via, v.address];
+    const n: Candidate[] = [];
+    const o: Candidate[] = [];
+    for (const i of v.introductions) {
+      const isNamed = i.for.includes(said);
+      (isNamed ? n : o).push({ address: i.source, via, named: isNamed });
+    }
+    named.push(n);
+    others.push(o);
   }
-  return { ok: true, report: assemble(said, from, [start], []) };
+  const out: Candidate[] = [];
+  const seen = new Set(visited);
+  for (const lists of [named, others]) {
+    for (let k = 0; ; k++) {
+      let any = false;
+      for (const l of lists) {
+        if (k >= l.length) continue;
+        any = true;
+        const c = l[k]!;
+        if (!seen.has(c.address)) { seen.add(c.address); out.push(c); }
+      }
+      if (!any) break;
+    }
+  }
+  return out;
+}
+
+const byAddress = (a: { address: string }, b: { address: string }): number => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0);
+
+/**
+ * docs/design.md "The walk": breadth-first, every source at one depth before any at the next; within a depth the sources run under
+ * the session's host scheduling and are merged in address order, so the report does not depend on who answered first.
+ */
+export async function walk(said: string, from: string, session: Session): Promise<WalkOutcome> {
+  const visited = new Set<string>([from]);
+  const visits: Visited[] = [];
+  const skipped: Unresolved[] = [];
+  let level: Candidate[] = [{ address: from, via: [], named: false }];
+  for (let depth = 0; level.length > 0; depth++) {
+    const here: Visited[] = [];
+    await session.each(level, (c) => Session.hostOf(c.address), async (c) => { here.push(await visitSource(said, c, session)); });
+    here.sort(byAddress);
+    if (depth === 0 && !here[0]!.fetched) {
+      const u = here[0]!.unresolved[0]!;
+      return { ok: false, reason: u.reason, ...(u.target !== undefined ? { target: u.target } : {}) };
+    }
+    visits.push(...here);
+    const next = nextLevel(said, here, visited);
+    if (next.length === 0) break;
+    if (depth + 1 > session.limits.introductionDepth) {
+      for (const c of next) skipped.push({ address: c.address, via: c.via, reason: "skipped", limit: "depth" });
+      break;
+    }
+    const room = Math.max(0, session.limits.sourcesPerRun - visited.size);
+    for (const c of next.slice(room)) skipped.push({ address: c.address, via: c.via, reason: "skipped", limit: "sources" });
+    level = next.slice(0, room);
+    for (const c of level) visited.add(c.address);
+  }
+  return { ok: true, report: assemble(said, from, visits, skipped) };
 }
