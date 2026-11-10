@@ -8,7 +8,7 @@ In MAD a protocol is a set of definitions (models, authorizations and responsibi
 
 ## Status
 
-The design is approved (2026-11-09) and the work is two epics: the known-address half (sources, pages, the walk and `get`, epic bpm-5g1) and the stranger half (the catalog and the robots.txt finder, epic bpm-7h1), which starts when the maintainer says. There is no code yet and nothing is deployed.
+The design is approved (2026-11-09) and the work is two epics: the known-address half (sources, pages, the walk and `get`, epic bpm-5g1) and the stranger half (the catalog and the robots.txt finder, epic bpm-7h1), which starts when the maintainer says. Step 1 of the first epic is built: `build` makes a source from a folder of frozen definitions, and `verify` checks a file against a SAID. Nothing is deployed.
 
 ## Rulings
 
@@ -32,6 +32,19 @@ The maintainer's decisions, newest last. Each is the close reason of a `Rule:` b
 - [docs/research/design-review.md](docs/research/design-review.md): the review of the design's first draft. Six lenses, each re-checked by a skeptic; 95 findings, none refuted. It includes the measurement of the candidate finders against live data.
 
 The draft build spec itself is the repository's first commit: `git show 713a12f:MAD-DISCOVERY-SPEC.md`.
+
+## Running it
+
+Node 24, from a checkout: `npm ci`, then
+
+```bash
+npm run check                                   # TypeScript, as a type check only
+npm test                                        # node --test over tests/*.test.ts
+node bin/mad-discovery.ts build <folder> --config <file> --out <folder>
+node bin/mad-discovery.ts verify <file> <SAID>
+```
+
+The input folder holds one file per definition, named `<SAID>.json`. `fixtures/gym-config.json` is an example configuration; `fixtures/README.md` says where every test vector came from.
 
 ## How it relates to the other repositories
 
