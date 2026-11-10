@@ -40,11 +40,17 @@ function usage(io: Io, note = ""): number {
 
 export async function main(argv: string[], io: Io, options: RunOptions = {}): Promise<number> {
   const [command, ...rest] = argv;
-  if (command === "build") return build(rest, io);
-  if (command === "verify") return verify(rest, io, options);
-  if (command === "who") return who(rest, io, options);
-  if (command === "get") return bringHome(rest, io, options);
-  return usage(io);
+  // An exception no command expected is still a reported failure: the message is the tool's own or Node's, never a stranger's string.
+  try {
+    if (command === "build") return build(rest, io);
+    if (command === "verify") return await verify(rest, io, options);
+    if (command === "who") return await who(rest, io, options);
+    if (command === "get") return await bringHome(rest, io, options);
+    return usage(io);
+  } catch (e) {
+    io.out(asciiJson({ problems: [e instanceof Error ? e.message : String(e)] }) + "\n");
+    return 1;
+  }
 }
 
 const session = (options: RunOptions): Session => new Session(options.limits ?? WALK, { test: options.test, resolve: options.resolve });

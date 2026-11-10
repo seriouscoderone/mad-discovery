@@ -1,8 +1,9 @@
 import { checkSaid } from "./said.ts";
 import { appearances } from "./scan.ts";
 import { definitionAddress } from "./address.ts";
-import { readSource, redirectTarget, type Unresolved } from "./read.ts";
+import { readSource, redirectTarget, type ReadSource, type Unresolved } from "./read.ts";
 import { Session } from "./session.ts";
+import type { Introduction } from "./source.ts";
 
 export type GetResult = {
   said: string;
@@ -26,6 +27,9 @@ type Known = {
   exhausted: boolean;   // its host's time or bytes ran out; it supplies nothing more
 };
 
+const knownOf = (address: string, via: string[], r: Extract<ReadSource, { ok: true }>): Known =>
+  ({ address, via, base: r.base, serves: new Set(r.document.serves.map((s) => s.said)), fetched: 0, cut: false, exhausted: false });
+
 const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
@@ -36,22 +40,27 @@ const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
  */
 export async function get(said: string, from: string, session: Session): Promise<GetOutcome> {
   const unresolved: Unresolved[] = [];
-  const known = async (address: string, via: string[]): Promise<Known | null> => {
+  // A source read, or the entry that says why not; the caller merges these in address order, so the report does not depend on who answered first.
+  const known = async (address: string, via: string[]): Promise<Known | Unresolved> => {
     const stop = session.exhausted(Session.hostOf(address));
-    if (stop !== null) { unresolved.push({ address, via, reason: "skipped", limit: stop }); return null; }
+    if (stop !== null) return { address, via, reason: "skipped", limit: stop };
     const r = await readSource(address, via, session);
-    if (!r.ok) { unresolved.push(r.unresolved); return null; }
-    return { address, via, base: r.base, serves: new Set(r.document.serves.map((s) => s.said)), fetched: 0, cut: false, exhausted: false };
+    return r.ok ? knownOf(address, via, r) : r.unresolved;
   };
   const startRead = await readSource(from, [], session);
   if (!startRead.ok) return { ok: false, problem: `the starting source could not be read: ${startRead.unresolved.reason}`, unresolved: [startRead.unresolved] };
-  const start: Known = { address: from, via: [], base: startRead.base, serves: new Set(startRead.document.serves.map((s) => s.said)), fetched: 0, cut: false, exhausted: false };
+  const start = knownOf(from, [], startRead);
 
-  const introductions = startRead.document.introductions.slice(0, session.limits.introductionsPerSource);
-  if (startRead.document.introductions.length > introductions.length) unresolved.push({ address: from, via: [], reason: "truncated", limit: "introductions" });
-  const others: (Known | null)[] = introductions.map(() => null);
+  const listed = startRead.document.introductions.slice(0, session.limits.introductionsPerSource);
+  if (startRead.document.introductions.length > listed.length) unresolved.push({ address: from, via: [], reason: "truncated", limit: "introductions" });
+  // An address already read is not read again: the start introducing itself would otherwise count as a second lister.
+  const visited = new Set<string>([from]);
+  const introductions: Introduction[] = [];
+  for (const i of listed) if (!visited.has(i.source)) { visited.add(i.source); introductions.push(i); }
+  const others: (Known | Unresolved | null)[] = introductions.map(() => null);
   await session.each(introductions.map((i, k) => ({ i, k })), ({ i }) => Session.hostOf(i.source), async ({ i, k }) => { others[k] = await known(i.source, [from]); });
-  const sources: Known[] = [start, ...others.filter((k): k is Known => k !== null)];
+  const sources: Known[] = [start];
+  for (const o of others) if (o !== null) { if ("reason" in o) unresolved.push(o); else sources.push(o); }
 
   const files = new Map<string, Uint8Array>();
   const missing: { said: string; looked: string[] }[] = [];

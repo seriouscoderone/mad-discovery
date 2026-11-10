@@ -151,6 +151,7 @@ const byAddress = (a: { address: string }, b: { address: string }): number => (a
  */
 export async function walk(said: string, from: string, session: Session): Promise<WalkOutcome> {
   const visited = new Set<string>([from]);
+  let taken = 1;   // sources given a slot, against sourcesPerRun
   const visits: Visited[] = [];
   const skipped: Unresolved[] = [];
   let level: Candidate[] = [{ address: from, via: [], named: false }];
@@ -169,10 +170,12 @@ export async function walk(said: string, from: string, session: Session): Promis
       for (const c of next) skipped.push({ address: c.address, via: c.via, reason: "skipped", limit: "depth" });
       break;
     }
-    const room = Math.max(0, session.limits.sourcesPerRun - visited.size);
+    const room = Math.max(0, session.limits.sourcesPerRun - taken);
     for (const c of next.slice(room)) skipped.push({ address: c.address, via: c.via, reason: "skipped", limit: "sources" });
     level = next.slice(0, room);
-    for (const c of level) visited.add(c.address);
+    taken += level.length;
+    // Skipped addresses are remembered too, so each is reported once, with the first chain that reached it.
+    for (const c of next) visited.add(c.address);
   }
   return { ok: true, report: assemble(said, from, visits, skipped) };
 }

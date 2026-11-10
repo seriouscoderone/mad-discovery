@@ -88,11 +88,16 @@ test("each runs hostsInFlight hosts at a time and one item per host at a time, i
   assert.ok(order.indexOf("c:1") < order.indexOf("c:2"));
 });
 
-test("each finishes when an item's work rejects, and with no items", async () => {
+test("each runs every item when one item's work rejects, then rejects with that error; with no items it finishes", async () => {
   const s = new Session(limits({}), { test: true });
   const done: string[] = [];
-  await s.each(["x", "y"], (i) => i, async (i) => { if (i === "x") throw new Error("boom"); done.push(i); });
-  assert.deepEqual(done, ["y"]);
+  const boom = new Error("boom");
+  await assert.rejects(s.each(["x", "y", "z"], (i) => i, async (i) => { if (i === "x") throw boom; done.push(i); }), (e) => e === boom);
+  assert.deepEqual(done, ["y", "z"], "the other items still ran");
+  const [first, second] = [new Error("first"), new Error("second")];
+  let thrown = 0;
+  await assert.rejects(s.each(["a", "a", "b"], () => "h", async (i) => { if (i === "a") throw thrown++ === 0 ? first : second; done.push(i); }), (e) => e === first, "the first error seen");
+  assert.deepEqual(done, ["y", "z", "b"]);
   await s.each([], () => "", async () => {});
 });
 
@@ -112,10 +117,46 @@ test("each rejects before any work when an item's host cannot be computed", asyn
   assert.deepEqual(ran, [], "no work started");
 });
 
-test("a synchronous throw in work ends only its item", async () => {
+test("a synchronous throw in work is reported the same way, after every other item ran", async () => {
   const s = new Session(limits({}), { test: true });
   const done: string[] = [];
-  const work = (i: string): Promise<void> => { if (i === "x") throw new Error("sync boom"); done.push(i); return Promise.resolve(); };
-  await s.each(["x", "y", "z"], (i) => i, work);
+  const boom = new Error("sync boom");
+  const work = (i: string): Promise<void> => { if (i === "x") throw boom; done.push(i); return Promise.resolve(); };
+  await assert.rejects(s.each(["x", "y", "z"], (i) => i, work), (e) => e === boom);
   assert.deepEqual(done, ["y", "z"]);
+});
+
+test("a request's deadline is the host's remaining time when that is shorter than the request limit", async () => {
+  let clock = 0;
+  const s = new Session(limits({ requestMs: 2000, hostMs: 1000, runMs: null }), { test: true, now: () => clock });
+  origin.behave = (_req, res) => { clock += 700; res.setHeader("content-type", "application/json"); res.end("{}"); return true; };
+  try {
+    assert.equal((await s.fetch(url("x.json"))).outcome, "ok");
+    origin.behave = () => true;   // accepts and never answers
+    const t0 = performance.now();
+    assert.equal((await s.fetch(url("x.json"))).outcome, "timed-out");
+    const waited = performance.now() - t0;
+    assert.ok(waited >= 250 && waited < 1500, `cut at the host's 300 ms left, not the request's 2000: waited ${waited}`);
+  } finally { origin.behave = null; }
+});
+
+test("when the run and a host are both used up, the run is the reason", async () => {
+  let clock = 0;
+  const s = new Session(limits({ hostBytes: 1, runMs: 100 }), { test: true, now: () => clock });
+  const host = Session.hostOf(url("x.json"));
+  await s.fetch(url("x.json"));
+  assert.equal(s.exhausted(host), "host-bytes");
+  clock = 200;
+  assert.equal(s.exhausted(host), "run");
+});
+
+test("hostsInFlight below 1 is refused when the session is made", () => {
+  assert.throws(() => new Session(limits({ hostsInFlight: 0 })), RangeError);
+  assert.throws(() => new Session(limits({ hostsInFlight: -1 })), RangeError);
+});
+
+test("asking whether a host is used up records nothing about it", () => {
+  const s = new Session(limits({}), { test: true });
+  assert.equal(s.exhausted("never.example"), null);
+  assert.equal((s as unknown as { hosts: Map<string, unknown> }).hosts.size, 0);
 });

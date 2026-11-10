@@ -195,3 +195,17 @@ test("the usage names four commands", () => {
   assert.equal(r.code, 2);
   for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "who <SAID> --from <source address>", "get <SAID> --from <source address> --out <folder>"]) assert.ok(r.err.includes(cmd), cmd);
 });
+
+test("an out folder filled during the run is a reported failure, never a crash", async () => {
+  const a = await Origin.start();
+  try {
+    const { address } = a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const out = mkdtempSync(join(tmpdir(), "filled-"));
+    // Passes the check before any request; another process writes into it while the definition is fetched.
+    a.behave = (req) => { if (req.url === `/mad/definitions/${SELECTION}.json`) writeFileSync(join(out, "intruder"), "x"); return false; };
+    const c = capture();
+    assert.equal(await main(["get", SELECTION, "--from", address, "--out", out], c.io, local), 1);
+    assert.deepEqual(c.json(), { problems: [`${out} is not empty`] });
+    assert.deepEqual(readdirSync(out), ["intruder"], "nothing of ours was written");
+  } finally { a.behave = null; await a.close(); }
+});

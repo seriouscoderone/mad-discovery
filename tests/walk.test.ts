@@ -347,3 +347,18 @@ test("a run whose clock runs out keeps nothing of the source it was reading and 
   assert.ok(r.report.unresolved.some((u) => u.address === secondAddr && (u.reason === "timed-out" || (u.reason === "skipped" && u.limit === "run"))));
   assert.equal(r.report.unresolved.length, 2);
 });
+
+test("an address skipped for room is reported once, with the first chain that reached it", async () => {
+  const [a, b, x] = [await start(), await start(), await start()];
+  const [aAddr, bAddr, xAddr] = [a, b, x].map((o) => `${o.origin}/mad/source.json`);
+  x.source("mad/", { serve: [SELECTION] }, inputs);
+  b.source("mad/", { serve: [SELECTION], introductions: [{ source: xAddr }] }, inputs);
+  // b is named, so it takes the one slot at depth 1 whatever the ports; x is proposed at depth 1 by a and at depth 2 by b.
+  a.source("mad/", { serve: [SELECTION], introductions: [{ source: bAddr, for: [SELECTION] }, { source: xAddr }] }, inputs);
+  const r = await walk(SELECTION, aAddr, session({ sourcesPerRun: 2 }));
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.report.reached, 2);
+  assert.deepEqual(r.report.unresolved, [{ address: xAddr, via: [aAddr], reason: "skipped", limit: "sources" }]);
+  assert.deepEqual(x.requests, []);
+});

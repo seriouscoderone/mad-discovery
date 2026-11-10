@@ -107,3 +107,12 @@ test("the test option admits test addresses in introductions, and only then", ()
   const r2 = readSourceDocument(enc({ source: A, introductions: [{ source: "http://127.0.0.1:8081/source.json" }] }), A);
   assert.ok(r2.ok && r2.document.introductions.length === 0 && r2.dropped.entries === 1);
 });
+
+test("an introduction of the document's own address is dropped and counted", () => {
+  const r = read({ source: A, introductions: [{ source: A }, { source: "https://b.example/source.json" }] });
+  assert.ok(r.ok);
+  if (r.ok) {
+    assert.deepEqual(r.document.introductions, [{ source: "https://b.example/source.json", for: [] }]);
+    assert.equal(r.dropped.entries, 1);
+  }
+});

@@ -17,6 +17,7 @@ export class Session {
   private readonly hosts = new Map<string, HostState>();
 
   constructor(limits: Limits, options: SessionOptions = {}) {
+    if (!(limits.hostsInFlight > 0)) throw new RangeError("hostsInFlight must be at least 1");
     this.limits = limits;
     this.test = options.test === true;
     this.resolve = options.resolve;
@@ -43,13 +44,13 @@ export class Session {
   /** Why nothing more may be asked of this host, or null. */
   exhausted(name: string): Exhausted | null {
     if (this.remainingRun() <= 0) return "run";
-    const h = this.host(name);
+    const h = this.hosts.get(name) ?? { ms: 0, bytes: 0 };
     if (h.ms >= this.limits.hostMs) return "host-time";
     if (h.bytes >= this.limits.hostBytes) return "host-bytes";
     return null;
   }
 
-  /** One request within the request, host and run limits, charged to its host whatever the outcome. */
+  /** One request within the request, host and run limits, charged to its host whatever the outcome. One request at a time per host is each's job, not this one's. */
   async fetch(address: string): Promise<Fetched> {
     const href = parseHttpsAddress(address, { test: this.test });
     if (href === null) return { outcome: "refused-address", read: 0, ms: 0 };
@@ -65,10 +66,14 @@ export class Session {
     return r;
   }
 
-  /** Runs work over the items in order: at most hostsInFlight hosts at a time, one item at a time per host. A rejection ends only its item. */
+  /**
+   * Runs work over the items in order: at most hostsInFlight hosts at a time, one item at a time per host. Every item runs to
+   * completion; if any item's work threw, the call then rejects with the first error seen, so a fault is loud and never a silent loss.
+   */
   async each<T>(items: T[], hostOf: (item: T) => string, work: (item: T) => Promise<void>): Promise<void> {
     const pending = items.map((item) => ({ item, host: hostOf(item) }));
     const busy = new Set<string>();
+    const errors: unknown[] = [];
     await new Promise<void>((done) => {
       const pump = (): void => {
         while (busy.size < this.limits.hostsInFlight) {
@@ -77,11 +82,13 @@ export class Session {
           const { item, host } = pending.splice(i, 1)[0]!;
           busy.add(host);
           const release = (): void => { busy.delete(host); pump(); };
-          Promise.resolve().then(() => work(item)).then(release, release);
+          const fail = (error: unknown): void => { errors.push(error); release(); };
+          Promise.resolve().then(() => work(item)).then(release, fail);
         }
         if (pending.length === 0 && busy.size === 0) done();
       };
       pump();
     });
+    if (errors.length > 0) throw errors[0];
   }
 }

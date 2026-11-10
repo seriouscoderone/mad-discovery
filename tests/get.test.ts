@@ -204,3 +204,36 @@ test("wrong bytes on the request that uses a host up are a failed check there, n
   assert.ok(!r.files.has(`${first}.json`));
   assert.ok(!b.requests.includes(`mad/definitions/${first}.json`), "a listed it and failed the check, so b was not asked");
 });
+
+test("a start that introduces itself is read once and gives no more than its definitions limit", async () => {
+  const a = await start();
+  const { address: aAddr } = a.source("mad/", { serve: [SELECTION] }, inputs);
+  // Hand-written on the wire: the build cannot make a source introduce itself, and a hostile one can.
+  const doc = JSON.parse(new TextDecoder().decode(a.files.get("mad/source.json")!)) as Record<string, unknown>;
+  doc["introductions"] = [{ source: aAddr }];
+  a.put("mad/source.json", JSON.stringify(doc));
+  const r = await get(SELECTION, aAddr, session({ definitionsPerSource: 2 }));
+  assert.ok(r.ok, JSON.stringify(r));
+  if (!r.ok) return;
+  assert.equal(a.requests.filter((p) => p === "mad/source.json").length, 1, "one source.json request");
+  assert.equal(r.result.unresolved.filter((u) => u.reason === "truncated").length, 1);
+  assert.deepEqual(r.result.unresolved, [{ address: aAddr, via: [], reason: "truncated", limit: "definitions" }]);
+  assert.ok(r.result.missing.length > 0);
+  for (const m of r.result.missing) assert.deepEqual(m.looked, [aAddr]);
+  assert.ok(a.requests.filter((p) => p.startsWith("mad/definitions/")).length <= 2, "at most two definitions fetched from it");
+});
+
+test("introduced sources that fail are reported in address order, whoever answers first", async () => {
+  const [a, p, q] = [await start(), await start(), await start()];
+  const [pAddr, qAddr] = [p, q].map((o) => `${o.origin}/mad/source.json`);
+  const [low, high] = pAddr < qAddr ? [p, q] : [q, p];
+  // The source first in address order answers last.
+  low.behave = (_req, res) => { setTimeout(() => { res.statusCode = 404; res.end(); }, 150); return true; };
+  try {
+    const { address: aAddr } = a.source("mad/", { serve: [SELECTION], introductions: [{ source: pAddr }, { source: qAddr }] }, inputs);
+    const r = await get(SELECTION, aAddr, session());
+    assert.ok(r.ok, JSON.stringify(r));
+    if (!r.ok) return;
+    assert.deepEqual(r.result.unresolved, [low, high].map((o) => ({ address: `${o.origin}/mad/source.json`, via: [aAddr], reason: "not-found" })));
+  } finally { low.behave = null; }
+});

@@ -51,7 +51,7 @@ export function readSourceDocument(bytes: Uint8Array, address: string, opts: Add
   for (const item of list("introductions")) {
     if (!isRecord(item)) { dropped.entries++; continue; }
     const addr = typeof item["source"] === "string" ? parseSourceAddress(item["source"], opts) : null;
-    if (addr === null || introductions.has(addr.address)) { dropped.entries++; continue; }
+    if (addr === null || addr.address === address || introductions.has(addr.address)) { dropped.entries++; continue; }
     const forRaw = item["for"] ?? [];
     if (!Array.isArray(forRaw)) { dropped.entries++; continue; }
     const fors = new Set<string>();
