@@ -722,6 +722,15 @@ test("paths: pointer escaping, keys, limits", () => {
   assert.deepEqual(paths(bytes(`{"${longKey}":"${s}"}`), s), { parsed: true, count: 1, paths: [] }, "a path over 256 characters is left out");
 });
 
+test("paths: count and paths describe the same occurrences in the bytes", () => {
+  const s = "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB";
+  assert.deepEqual(paths(bytes(`{"k":"line\\n${s}"}`), s), { parsed: true, count: 0, paths: [] }, "the n of an escape sits before the SAID");
+  const escaped = s.slice(0, 4) + "\\u0047" + s.slice(5);
+  assert.deepEqual(paths(bytes(`{"k":"${escaped}"}`), s), { parsed: true, count: 0, paths: [] }, "an escape inside the SAID");
+  assert.deepEqual(paths(bytes(`{"k":"${s}\\u0041"}`), s), { parsed: true, count: 1, paths: ["/k"] }, "an escape after the SAID");
+  assert.deepEqual(paths(bytes(`{"${s}":1,"${s}":2}`), s), { parsed: true, count: 2, paths: [`/${s}`, `/${s}`] }, "duplicate keys");
+});
+
 test("paths: too deep or not JSON gives the count and no paths", () => {
   const s = "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB";
   const deep = "[".repeat(100_000) + `"${s}"` + "]".repeat(100_000);
@@ -791,31 +800,54 @@ export function depth(text: string): number {
 
 const escapePointer = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
 
-function holds(s: string, said: string): boolean {
-  return occurrences(s).some((o) => o.said === said);
-}
+type Frame =
+  | { kind: "object"; pointer: string; expectKey: boolean; key: string }
+  | { kind: "array"; pointer: string; index: number };
 
-/** JSON Pointers of the strings and keys that hold the SAID, bounded; the count is of every occurrence in the bytes. */
+/** JSON Pointers of the strings and keys that hold the SAID, one per occurrence in the bytes, bounded; the count is of every occurrence. */
 export function paths(bytes: Uint8Array, said: string): { parsed: boolean; count: number; paths: string[] } {
   const text = latin1(bytes);
-  const count = occurrences(text).filter((o) => o.said === said).length;
+  const occs = occurrences(text).filter((o) => o.said === said);
+  const count = occs.length;
   if (!isSaid(said) || depth(text) > PATH_LIMITS.maxDepth) return { parsed: false, count, paths: [] };
-  let value: unknown;
-  try { value = JSON.parse(Buffer.from(bytes).toString("utf8")); } catch { return { parsed: false, count, paths: [] }; }
+  try { JSON.parse(Buffer.from(bytes).toString("utf8")); } catch { return { parsed: false, count, paths: [] }; }
+  // Valid JSON from here: walk its tokens once, iteratively, and give each occurrence the pointer of the string token around it.
   const out: string[] = [];
-  const visit = (v: unknown, pointer: string): void => {
-    if (out.length >= PATH_LIMITS.maxPaths) return;
-    if (typeof v === "string") { if (holds(v, said) && pointer.length <= PATH_LIMITS.maxLength) out.push(pointer); return; }
-    if (Array.isArray(v)) { v.forEach((item, i) => visit(item, `${pointer}/${i}`)); return; }
-    if (v !== null && typeof v === "object") {
-      for (const [k, item] of Object.entries(v as Record<string, unknown>)) {
-        const p = `${pointer}/${escapePointer(k)}`;
-        if (holds(k, said) && p.length <= PATH_LIMITS.maxLength && out.length < PATH_LIMITS.maxPaths) out.push(p);
-        visit(item, p);
-      }
-    }
+  const stack: Frame[] = [];
+  const valuePointer = (): string => {
+    const top = stack[stack.length - 1];
+    if (top === undefined) return "";
+    return top.kind === "object" ? `${top.pointer}/${top.key}` : `${top.pointer}/${top.index}`;
   };
-  visit(value, "");
+  let k = 0;
+  let i = 0;
+  while (i < text.length && k < count) {
+    const c = text[i];
+    const top = stack[stack.length - 1];
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") { i++; continue; }
+    if (c === "{") { stack.push({ kind: "object", pointer: valuePointer(), expectKey: true, key: "" }); i++; continue; }
+    if (c === "[") { stack.push({ kind: "array", pointer: valuePointer(), index: 0 }); i++; continue; }
+    if (c === "}" || c === "]") { stack.pop(); i++; continue; }
+    if (c === ",") { if (top?.kind === "object") top.expectKey = true; else if (top?.kind === "array") top.index++; i++; continue; }
+    if (c === ":") { if (top?.kind === "object") top.expectKey = false; i++; continue; }
+    if (c === '"') {
+      let j = i + 1;
+      while (text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      const end = j + 1;
+      let pointer: string;
+      if (top?.kind === "object" && top.expectKey) {
+        top.key = escapePointer(JSON.parse(Buffer.from(bytes.subarray(i, end)).toString("utf8")) as string);
+        pointer = `${top.pointer}/${top.key}`;
+      } else pointer = valuePointer();
+      while (k < count && occs[k]!.at + 44 <= end) {
+        if (occs[k]!.at >= i && pointer.length <= PATH_LIMITS.maxLength && out.length < PATH_LIMITS.maxPaths) out.push(pointer);
+        k++;
+      }
+      i = end;
+      continue;
+    }
+    while (i < text.length && !/[\s{}\[\],:"]/.test(text[i]!)) i++;
+  }
   return { parsed: true, count, paths: out };
 }
 ```
@@ -824,6 +856,8 @@ export function paths(bytes: Uint8Array, said: string): { parsed: boolean; count
 
 Run: `npm run check && npm test`
 Expected: all pass. The deep case must finish in well under a second and must not throw.
+
+Note (added at execution): the first version of `paths` applied the boundary rule to the decoded string after `JSON.parse`, so `count` and `paths` disagreed when a JSON escape sat inside or beside a SAID. The review of Task 5 found it; the code above is the corrected form, which derives every pointer from the byte offset of an occurrence with a small iterative tokenizer, and the tests include the four cases that exposed it.
 
 - [ ] **Step 5: Commit**
 
