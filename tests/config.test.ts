@@ -29,5 +29,7 @@ test("refusals name the member", () => {
   assert.match(problems({ ...base, publications: [{ ...pub, by: "ok-aid", other: 1 }] }).join(), /unknown member: other/);
   assert.match(problems({ ...base, introductions: [{ source: "https://x.example/mad/other.json", for: [] }] }).join(), /introductions\[0\].source/);
   assert.match(problems({ ...base, catalogs: ["https://x.example/c/source.json"] }).join(), /catalogs\[0\]/);
+  assert.match(problems({ ...base, introductions: [[1]] }).join(), /introductions\[0\] is not an object/);
+  assert.match(problems({ ...base, publications: [{ ...pub, target: "nope" }] }).join(), /target is not a SAID/);
   assert.deepEqual(problems({ ...base, by: "EKxy", oobi: "https://x.example/oobi/EKxy", publications: [{ ...pub, by: "EKxy" }] }), []);
 });

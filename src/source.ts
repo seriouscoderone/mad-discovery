@@ -1,4 +1,6 @@
 /** The source document and its records, as docs/design.md defines them. */
+import { isSaid } from "./said.ts";
+
 export const AID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export const LIMITS = {
@@ -27,13 +29,13 @@ export type SourceDocument = {
 // C0 and C1 control characters, which must not reach a terminal or a page.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
-export function hasControlCharacters(s: string): boolean {
+function hasControlCharacters(s: string): boolean {
   return CONTROL.test(s);
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** A publication's shape and limits. The caller checks that target and by match their patterns. */
+/** A publication's shape, limits and patterns. */
 export function validatePublication(value: unknown): { ok: true; publication: Publication } | { ok: false; problem: string } {
   if (!isRecord(value)) return { ok: false, problem: "not an object" };
   const allowed = new Set(["target", "by", "name", "description", "tags", "collection"]);
@@ -45,13 +47,13 @@ export function validatePublication(value: unknown): { ok: true; publication: Pu
     if (hasControlCharacters(v)) return { problem: `${k} holds a control character` };
     return v;
   };
-  const target = text("target", 44); if (typeof target !== "string") return { ok: false, problem: target.problem };
+  const target = value["target"]; if (typeof target !== "string" || !isSaid(target)) return { ok: false, problem: "target is not a SAID" };
   const name = text("name", LIMITS.name); if (typeof name !== "string") return { ok: false, problem: name.problem };
   const description = text("description", LIMITS.description); if (typeof description !== "string") return { ok: false, problem: description.problem };
   const collection = text("collection", LIMITS.collection); if (typeof collection !== "string") return { ok: false, problem: collection.problem };
   const tags = value["tags"];
   if (!Array.isArray(tags) || tags.length > LIMITS.tags) return { ok: false, problem: `tags is not a list of at most ${LIMITS.tags}` };
-  for (const t of tags) if (typeof t !== "string" || t.length > LIMITS.tag || hasControlCharacters(t)) return { ok: false, problem: "a tag is not a string of at most 64 characters without control characters" };
+  for (const [i, t] of tags.entries()) if (typeof t !== "string" || t.length > LIMITS.tag || hasControlCharacters(t)) return { ok: false, problem: `tags[${i}] is not a string of at most 64 characters without control characters` };
   const publication: Publication = { target, name, description, tags: tags as string[], collection };
   if (value["by"] !== undefined) {
     if (typeof value["by"] !== "string" || !AID_PATTERN.test(value["by"])) return { ok: false, problem: "by is not an AID" };

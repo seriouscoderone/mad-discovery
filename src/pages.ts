@@ -19,7 +19,7 @@ export function escapeHtml(s: string): string {
     .replace(/[\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, (c) => `&#x${c.codePointAt(0)!.toString(16)};`);
 }
 
-export function publicationsFor(document: SourceDocument, said: string): Publication[] {
+function publicationsFor(document: SourceDocument, said: string): Publication[] {
   return document.publications.filter((p) => p.target === said);
 }
 
@@ -118,7 +118,7 @@ function indexPage(input: PagesInput): string {
   return shell("Definitions served here", "style.css", body);
 }
 
-export const STYLE_CSS = `body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:48rem;padding:1rem}
+const STYLE_CSS = `body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:48rem;padding:1rem}
 code,pre{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
 pre{background:#f4f4f4;padding:.5rem;white-space:pre-wrap}
 dl{margin:0 0 0 1rem}dt{font-weight:600}dd{margin:0 0 .25rem 1rem}

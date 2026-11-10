@@ -1,6 +1,6 @@
 import { isSaid } from "./said.ts";
 import { parseSourceAddress, parseCatalogAddress, parseHttpsAddress, type Address, type AddressOptions } from "./address.ts";
-import { AID_PATTERN, validatePublication, type Publication, type Introduction } from "./source.ts";
+import { AID_PATTERN, isRecord, validatePublication, type Publication, type Introduction } from "./source.ts";
 
 /** The operator's one authored input. Read strictly: an unknown member is a mistake, not an extension. */
 export type Config = {
@@ -27,8 +27,8 @@ export function parseConfig(text: string, opts: AddressOptions = {}): Config {
   const problems: string[] = [];
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { throw new ConfigError(["not JSON"]); }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new ConfigError(["not an object"]);
-  const r = raw as Record<string, unknown>;
+  if (!isRecord(raw)) throw new ConfigError(["not an object"]);
+  const r = raw;
   for (const k of Object.keys(r)) if (!ALLOWED.has(k)) problems.push(`unknown member: ${k}`);
 
   const source = typeof r["source"] === "string" ? parseSourceAddress(r["source"], opts) : null;
@@ -57,14 +57,13 @@ export function parseConfig(text: string, opts: AddressOptions = {}): Config {
   list("publications").forEach((v, i) => {
     const res = validatePublication(v);
     if (!res.ok) { problems.push(`publications[${i}]: ${res.problem}`); return; }
-    if (!isSaid(res.publication.target)) { problems.push(`publications[${i}].target is not a SAID`); return; }
     publications.push(res.publication);
   });
 
   const introductions: Introduction[] = [];
   list("introductions").forEach((v, i) => {
-    if (typeof v !== "object" || v === null) { problems.push(`introductions[${i}] is not an object`); return; }
-    const o = v as Record<string, unknown>;
+    if (!isRecord(v)) { problems.push(`introductions[${i}] is not an object`); return; }
+    const o = v;
     for (const k of Object.keys(o)) if (k !== "source" && k !== "for") problems.push(`introductions[${i}]: unknown member: ${k}`);
     const addr = typeof o["source"] === "string" ? parseSourceAddress(o["source"], opts) : null;
     if (addr === null) { problems.push(`introductions[${i}].source is not a source address`); return; }

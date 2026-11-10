@@ -35,15 +35,17 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
   if (problems.length > 0) throw new BuildError(problems);
 
   const served = new Set<string>();
+  const refersOf = new Map<string, string[]>();
   const unserved = new Map<string, Set<string>>();
   const queue = [...start];
   while (queue.length > 0) {
     const said = queue.shift()!;
     if (served.has(said)) continue;
-    const bytes = inputs.get(said);
-    if (bytes === undefined) continue;
+    const bytes = inputs.get(said)!;
     served.add(said);
-    for (const inner of appearances(bytes, said)) {
+    const found = appearances(bytes, said);
+    refersOf.set(said, found);
+    for (const inner of found) {
       if (inputs.has(inner)) queue.push(inner);
       else { if (!unserved.has(inner)) unserved.set(inner, new Set()); unserved.get(inner)!.add(said); }
     }
@@ -51,15 +53,29 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
   const introducedFor = new Set(config.introductions.flatMap((i) => i.for));
 
   const saids = [...served].sort();
-  const serves: ServesEntry[] = saids.map((said) => ({ said, refers: appearances(inputs.get(said)!, said) }));
+  const serves: ServesEntry[] = saids.map((said) => ({ said, refers: refersOf.get(said)! }));
 
-  const document: SourceDocument = { source: config.source.address, serves, publications: config.publications, introductions: config.introductions, catalogs: config.catalogs, pages: true };
-  if (config.by !== undefined) document.by = config.by;
-  if (config.oobi !== undefined) document.oobi = config.oobi;
-  const ordered = orderDocument(document);
+  // Built once in a fixed member order, so two builds of one input are byte-identical.
+  const document: SourceDocument = {
+    source: config.source.address,
+    ...(config.by !== undefined ? { by: config.by } : {}),
+    ...(config.oobi !== undefined ? { oobi: config.oobi } : {}),
+    pages: true,
+    serves,
+    publications: config.publications.map((p) => ({
+      target: p.target,
+      ...(p.by !== undefined ? { by: p.by } : {}),
+      name: p.name,
+      description: p.description,
+      tags: p.tags,
+      collection: p.collection,
+    })),
+    introductions: config.introductions,
+    catalogs: config.catalogs,
+  };
 
   const files = new Map<string, Uint8Array>();
-  const sourceBytes = encoder.encode(JSON.stringify(ordered, null, 2) + "\n");
+  const sourceBytes = encoder.encode(JSON.stringify(document, null, 2) + "\n");
   if (sourceBytes.length > LIMITS.file) problems.push(`source.json would be ${sourceBytes.length} bytes, over 1 MB; split the source`);
   files.set("source.json", sourceBytes);
   for (const said of saids) {
@@ -67,38 +83,17 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
     if (!checkSaid(bytes, said)) problems.push(`definitions/${said}.json does not verify`);
     files.set(`definitions/${said}.json`, bytes);
   }
-  for (const [path, text] of renderPages({ document: ordered, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])) })) files.set(path, encoder.encode(text));
+  for (const [path, text] of renderPages({ document, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])) })) files.set(path, encoder.encode(text));
   files.set("sitemap.xml", encoder.encode(sitemapXml(config.source.base, saids)));
   if (problems.length > 0) throw new BuildError(problems);
 
   return {
     files,
-    document: ordered,
+    document,
     unserved: [...unserved.keys()].sort().map((said) => ({ said, appearsIn: [...unserved.get(said)!].sort() })).filter((u) => !introducedFor.has(u.said)),
     robotsLine: `Mad-Source: ${config.source.address}`,
     sitemapLine: `Sitemap: ${config.source.base}sitemap.xml`,
   };
-}
-
-/** A fixed member order, so two builds of one input are byte-identical. */
-function orderDocument(d: SourceDocument): SourceDocument {
-  const out: SourceDocument = { source: d.source } as SourceDocument;
-  if (d.by !== undefined) out.by = d.by;
-  if (d.oobi !== undefined) out.oobi = d.oobi;
-  out.pages = d.pages ?? false;
-  out.serves = d.serves;
-  out.publications = d.publications.map((p) => {
-    const q = { target: p.target } as typeof p;
-    if (p.by !== undefined) q.by = p.by;
-    q.name = p.name;
-    q.description = p.description;
-    q.tags = p.tags;
-    q.collection = p.collection;
-    return q;
-  });
-  out.introductions = d.introductions;
-  out.catalogs = d.catalogs;
-  return out;
 }
 
 /** --out must be absent or an empty folder: null when it is, otherwise the problem. */
