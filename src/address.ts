@@ -13,20 +13,22 @@ function parseUrl(s: string, opts: AddressOptions): URL | null {
   try { url = new URL(s); } catch { return null; }
   const test = opts.test === true;
   if (url.protocol !== "https:" && !(test && url.protocol === "http:")) return null;
-  if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") return null;
+  if (url.href.length > MAX_LENGTH) return null;
+  // The canonical form: no user name, password, query or fragment, not even an empty one.
+  if (url.href !== url.origin + url.pathname) return null;
   if (url.port !== "" && !test) return null;
   const host = url.hostname;
   if (host === "" || host.endsWith(".")) return null;
   const literal = IPV4.test(host) || host.startsWith("[");
   if (literal && !(test && (host === "127.0.0.1" || host === "[::1]"))) return null;
+  if ((host === "localhost" || host.endsWith(".localhost")) && !test) return null;
   return url;
 }
 
 function parseEnding(s: string, ending: string, opts: AddressOptions): Address | null {
   const url = parseUrl(s, opts);
   if (url === null || !url.pathname.endsWith(ending)) return null;
-  const address = url.href;
-  return { address, base: address.slice(0, address.length - ending.length + 1) };
+  return { address: url.href, base: url.origin + url.pathname.slice(0, url.pathname.length - ending.length + 1) };
 }
 
 export function parseSourceAddress(s: string, opts: AddressOptions = {}): Address | null {
@@ -45,5 +47,6 @@ export function parseHttpsAddress(s: string, opts: AddressOptions = {}): string 
 
 export function definitionAddress(base: string, said: string): string {
   if (!isSaid(said)) throw new Error(`not a SAID: ${said}`);
+  if (!base.endsWith("/")) throw new Error("a base ends with /");
   return `${base}definitions/${said}.json`;
 }
