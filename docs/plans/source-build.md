@@ -1561,7 +1561,7 @@ git push
 
 **Acceptance Criteria:**
 - Every served SAID has a page; the index page lists every served SAID by the names its publications give, or by SAID when it has none.
-- A definition page shows: the publications' names, descriptions and `by` (or the source's `by`); the SAID and the command `mad-discovery verify <definition address> <SAID>`; the content as an outline, with SAIDs inside it linked to their pages when this source serves them; the served definitions that contain it, each with the places of the appearance; the introductions `for` it, by address; the catalogs, each linked to `<catalog base>pages/<SAID>/index.html`.
+- A definition page shows: the publications' names, descriptions and `by` (or the source's `by`); the SAID and the command `mad-discovery verify <definition address> <SAID>`; the content as an outline, with SAIDs inside it linked to their pages when this source serves them (never to the page itself); the served definitions that contain it, each with the places of the appearance; the introductions `for` it, by address; the catalogs, each linked to `<catalog base>pages/<SAID>/index.html`.
 - Hostile strings (`</script><script>`, `"><img src=x onerror=...>`, `javascript:alert(1)`, bidirectional controls) appear only as escaped text, never as markup or a link target; the page has no `<script`; every `<` in the page starts one of the writer's own tags; every `href` is a relative page link, the stylesheet, or an address from the document.
 - The page carries the Content-Security-Policy `<meta>` and no inline style attribute; links are relative and name `index.html`.
 
@@ -1731,7 +1731,9 @@ function definitionPage(said: string, input: PagesInput, served: Set<string>): s
   const title = pubs[0]?.name ?? said;
   let parsed: unknown = null;
   let content: string;
-  try { parsed = JSON.parse(Buffer.from(bytes).toString("utf8")); content = outline(parsed, served); }
+  const linkable = new Set(served);
+  linkable.delete(said);                                  // a page does not link to itself
+  try { parsed = JSON.parse(Buffer.from(bytes).toString("utf8")); content = outline(parsed, linkable); }
   catch { content = `<pre>${escapeHtml(Buffer.from(bytes).toString("utf8"))}</pre>`; }
 
   const containers = document.serves.filter((s) => s.refers.includes(said)).map((s) => {
