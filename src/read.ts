@@ -21,9 +21,11 @@ export function redirectTarget(f: Fetched): { target: string } | Record<never, n
 
 /** Fetch a source document and read it; on any failure, the unresolved entry that says why. */
 export async function readSource(address: string, via: string[], session: Session): Promise<ReadSource> {
+  const parsed = parseSourceAddress(address, { test: session.test });
+  if (parsed === null) return { ok: false, unresolved: { address, via, reason: "refused-address" } };
   const f = await session.fetch(address);
   if (f.outcome !== "ok") return { ok: false, unresolved: { address, via, reason: f.outcome, ...redirectTarget(f) } };
   const d = readSourceDocument(f.bytes, address, { test: session.test });
   if (!d.ok) return { ok: false, unresolved: { address, via, reason: "invalid" } };
-  return { ok: true, document: d.document, base: parseSourceAddress(address, { test: session.test })!.base, dropped: d.dropped };
+  return { ok: true, document: d.document, base: parsed.base, dropped: d.dropped };
 }

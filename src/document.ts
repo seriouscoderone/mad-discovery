@@ -32,10 +32,10 @@ export function readSourceDocument(bytes: Uint8Array, address: string, opts: Add
     if (!isRecord(item)) { dropped.entries++; continue; }
     const said = item["said"];
     if (typeof said !== "string" || !isSaid(said) || serves.has(said)) { dropped.entries++; continue; }
-    const refersRaw = item["refers"] ?? [];
+    const refersRaw = item["refers"] === undefined ? [] : item["refers"];
     if (!Array.isArray(refersRaw)) { dropped.entries++; continue; }
     const refers = new Set<string>();
-    for (const s of refersRaw) { if (typeof s === "string" && isSaid(s) && s !== said) refers.add(s); else dropped.entries++; }
+    for (const s of refersRaw) { if (typeof s === "string" && isSaid(s) && s !== said && !refers.has(s)) refers.add(s); else dropped.entries++; }
     serves.set(said, { said, refers: [...refers].sort(byString) });
   }
 
@@ -52,10 +52,10 @@ export function readSourceDocument(bytes: Uint8Array, address: string, opts: Add
     if (!isRecord(item)) { dropped.entries++; continue; }
     const addr = typeof item["source"] === "string" ? parseSourceAddress(item["source"], opts) : null;
     if (addr === null || addr.address === address || introductions.has(addr.address)) { dropped.entries++; continue; }
-    const forRaw = item["for"] ?? [];
+    const forRaw = item["for"] === undefined ? [] : item["for"];
     if (!Array.isArray(forRaw)) { dropped.entries++; continue; }
     const fors = new Set<string>();
-    for (const s of forRaw) { if (typeof s === "string" && isSaid(s)) fors.add(s); else dropped.entries++; }
+    for (const s of forRaw) { if (typeof s === "string" && isSaid(s) && !fors.has(s)) fors.add(s); else dropped.entries++; }
     introductions.set(addr.address, { source: addr.address, for: [...fors].sort(byString) });
   }
 

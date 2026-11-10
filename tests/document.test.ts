@@ -116,3 +116,31 @@ test("an introduction of the document's own address is dropped and counted", () 
     assert.equal(r.dropped.entries, 1);
   }
 });
+
+test("a duplicate SAID inside refers or for is dropped and counted, and null is a wrong type there", () => {
+  const r = read({ source: A, serves: [{ said: X, refers: [Y, Y] }], introductions: [{ source: "https://b.example/source.json", for: [Y, Y] }] });
+  assert.ok(r.ok);
+  if (r.ok) {
+    assert.deepEqual(r.document.serves, [{ said: X, refers: [Y] }]);
+    assert.deepEqual(r.document.introductions, [{ source: "https://b.example/source.json", for: [Y] }]);
+    assert.equal(r.dropped.entries, 2);
+  }
+  const n = read({ source: A, serves: [{ said: X, refers: null }, { said: Y }], introductions: [{ source: "https://b.example/source.json", for: null }] });
+  assert.ok(n.ok);
+  if (n.ok) {
+    assert.deepEqual(n.document.serves, [{ said: Y, refers: [] }]);
+    assert.deepEqual(n.document.introductions, []);
+    assert.equal(n.dropped.entries, 2);
+  }
+});
+
+test("by, oobi and pages are kept when valid", () => {
+  const r = read({ source: A, by: "EKxyAID", oobi: "https://a.example/oobi/EKxyAID", pages: true });
+  assert.ok(r.ok);
+  if (r.ok) {
+    assert.equal(r.document.by, "EKxyAID");
+    assert.equal(r.document.oobi, "https://a.example/oobi/EKxyAID");
+    assert.equal(r.document.pages, true);
+    assert.deepEqual(r.dropped, { entries: 0, publications: 0 });
+  }
+});

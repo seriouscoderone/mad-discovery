@@ -38,10 +38,10 @@ test("status codes map to outcomes", async () => {
 
 test("a redirect is not followed and names its target", async () => {
   for (const status of [301, 302, 307, 308]) {
-    origin.behave = (_req, res) => { res.statusCode = status; res.setHeader("location", "http://elsewhere.test/y.json"); res.end(); return true; };
+    origin.behave = (req, res) => { if (req.url !== "/x.json") return false; res.statusCode = status; res.setHeader("location", `${origin.origin}/y.json`); res.end(); return true; };
     const r = await fetchLocal("x.json");
     assert.equal(r.outcome, "redirected");
-    if (r.outcome === "redirected") assert.equal(r.target, "http://elsewhere.test/y.json");
+    if (r.outcome === "redirected") assert.equal(r.target, `${origin.origin}/y.json`);
   }
   origin.behave = (_req, res) => { res.statusCode = 302; res.end(); return true; };
   const r = await fetchLocal("x.json");
@@ -93,8 +93,10 @@ test("a closed port is unreachable", async () => {
 
 test("the address rule is applied before anything is resolved", async () => {
   const calls: string[] = [];
-  const resolve: Resolve = async (h) => { calls.push(h); return ["93.184.216.34"]; };
-  for (const bad of ["https://1.2.3.4/x.json", "https://localhost/x.json", "https://a.test:8443/x.json", "https://a.test/x.json?q", "ftp://a.test/x.json"]) {
+  // Records and throws: were the rule to regress, the request would end unreachable here, never on a socket to anywhere.
+  const resolve: Resolve = async (h) => { calls.push(h); throw new Error("the resolver must not be asked"); };
+  // Literals are loopback, so even a regressed rule connects to nothing beyond this machine.
+  for (const bad of ["https://127.0.0.1/x.json", "https://[::1]/x.json", "https://localhost/x.json", "https://a.test:8443/x.json", "https://a.test/x.json?q", "ftp://a.test/x.json"]) {
     assert.equal((await fetchJson(bad, { timeoutMs: 1000, maxBytes: 1000, resolve })).outcome, "refused-address", bad);
   }
   assert.equal((await fetchJson(url("x.json"), { timeoutMs: 1000, maxBytes: 1000, resolve })).outcome, "refused-address", "plain http outside tests");
@@ -103,7 +105,7 @@ test("the address rule is applied before anything is resolved", async () => {
 
 test("the name is resolved once and the socket gets the checked answer", async () => {
   const port = new URL(origin.origin).port;
-  const answers = [["127.0.0.1"], ["203.0.113.1"]];
+  const answers = [["127.0.0.1"], ["127.0.0.2"]];
   const calls: string[] = [];
   const resolve: Resolve = async (h) => { calls.push(h); return answers.shift()!; };
   const before = origin.requests.length;
@@ -116,11 +118,35 @@ test("the name is resolved once and the socket gets the checked answer", async (
 
 test("an answer that is not public is refused without a connection", async () => {
   const before = origin.requests.length;
-  for (const answers of [["127.0.0.1"], ["93.184.216.34", "10.0.0.1"], ["::1"], []]) {
+  // Outside tests, loopback answers only: a regressed check would connect to this machine's port 443 and nowhere else.
+  for (const answers of [["127.0.0.1"], ["::1"], []]) {
     const r = await fetchJson("https://a.test/x.json", { timeoutMs: 1000, maxBytes: 1000, resolve: async () => answers });
     assert.equal(r.outcome, "refused-address", JSON.stringify(answers));
   }
+  // Every answer is checked, not the first: under test the loopback answer alone would pass, and it comes first, so a check of the
+  // first answer only would reach the local origin, where the request log would show it.
+  const port = new URL(origin.origin).port;
+  const mixed = await fetchJson(`http://a.test:${port}/x.json`, { ...quick, resolve: async () => ["127.0.0.1", "10.0.0.1"] });
+  assert.equal(mixed.outcome, "refused-address");
   assert.equal(origin.requests.length, before);
+});
+
+test("with two admitted answers the first is used, and the request names the host", async () => {
+  const port = new URL(origin.origin).port;
+  let host: string | undefined;
+  origin.behave = (req) => { host = req.headers.host; return false; };
+  try {
+    const r = await fetchJson(`http://a.test:${port}/x.json`, { ...quick, resolve: async () => ["127.0.0.1", "127.0.0.2"] });
+    assert.equal(r.outcome, "ok", "the origin listens on 127.0.0.1 only");
+    assert.equal(host, `a.test:${port}`);
+  } finally { origin.behave = null; }
+});
+
+test("a resolver that rejects with something that is not an error is unreachable", async () => {
+  for (const reason of [undefined, null, "text"]) {
+    const resolve: Resolve = () => Promise.reject(reason);
+    assert.equal((await fetchJson("https://a.test/x.json", { timeoutMs: 300, maxBytes: 1000, resolve })).outcome, "unreachable", String(reason));
+  }
 });
 
 test("a resolver that never answers times out; one that rejects is unreachable", async () => {

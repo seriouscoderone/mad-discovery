@@ -7,6 +7,7 @@ import { saidOf, FILL } from "../src/said.ts";
 import { Session } from "../src/session.ts";
 import { WALK, type Limits } from "../src/limits.ts";
 import { walk } from "../src/walk.ts";
+import { readSource } from "../src/read.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const { inputs } = readInputs(fileURLToPath(new URL("../fixtures/compact/", import.meta.url)));
@@ -361,4 +362,12 @@ test("an address skipped for room is reported once, with the first chain that re
   assert.equal(r.report.reached, 2);
   assert.deepEqual(r.report.unresolved, [{ address: xAddr, via: [aAddr], reason: "skipped", limit: "sources" }]);
   assert.deepEqual(x.requests, []);
+});
+
+test("readSource refuses an address that is not a source address, and asks nothing", async () => {
+  const a = await start();
+  const address = `${a.origin}/x/doc.json`;
+  a.put("x/doc.json", JSON.stringify({ source: address }));   // would read, were it fetched
+  assert.deepEqual(await readSource(address, [], session()), { ok: false, unresolved: { address, via: [], reason: "refused-address" } });
+  assert.deepEqual(a.requests, []);
 });

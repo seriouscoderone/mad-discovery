@@ -20,7 +20,7 @@ if (mode === "routine") {
 } else {
   const url = new URL(address);
   const outcome = await new Promise<string>((resolve) => {
-    const req = http.request({ hostname: url.hostname, port: url.port, path: url.pathname, agent: http.globalAgent, lookup: (_h, _o, cb) => cb(null, [{ address: "127.0.0.1", family: 4 }]) }, (res) => { res.resume(); res.on("end", () => resolve("ok")); });
+    const req = http.request({ hostname: url.hostname, port: url.port, path: url.pathname, agent: http.globalAgent, lookup: (_h, o, cb) => { if (o.all) cb(null, [{ address: "127.0.0.1", family: 4 }]); else cb(null, "127.0.0.1", 4); } }, (res) => { res.resume(); res.on("end", () => resolve("ok")); });
     req.on("error", () => resolve("error"));
     req.setTimeout(3000, () => { req.destroy(); resolve("error"); });
     req.end();

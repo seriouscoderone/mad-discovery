@@ -32,7 +32,7 @@ export const resolveNames: Resolve = async (hostname, timeoutMs) => {
   try {
     const [v4, v6] = await Promise.allSettled([resolver.resolve4(hostname), resolver.resolve6(hostname)]);
     const addresses = [...(v4.status === "fulfilled" ? v4.value : []), ...(v6.status === "fulfilled" ? v6.value : [])];
-    if (addresses.length === 0) throw v4.status === "rejected" ? v4.reason : (v6 as PromiseRejectedResult).reason;
+    if (addresses.length === 0) throw v4.status === "rejected" ? v4.reason : v6.status === "rejected" ? v6.reason : new Error("the name has no address");
     return addresses;
   } finally {
     clearTimeout(timer);
@@ -49,6 +49,7 @@ function isJsonType(header: string | undefined): boolean {
 }
 
 function isTimeout(e: unknown): boolean {
+  if (typeof e !== "object" || e === null) return false;
   const code = (e as { code?: unknown }).code;
   return code === "ECANCELLED" || code === "ETIMEOUT";
 }
