@@ -38,6 +38,15 @@ test("paths: pointer escaping, keys, limits", () => {
   assert.deepEqual(paths(bytes(`{"${longKey}":"${s}"}`), s), { parsed: true, count: 1, paths: [] }, "a path over 256 characters is left out");
 });
 
+test("paths: count and paths describe the same occurrences in the bytes", () => {
+  const s = "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB";
+  assert.deepEqual(paths(bytes(`{"k":"line\\n${s}"}`), s), { parsed: true, count: 0, paths: [] }, "the n of an escape sits before the SAID");
+  const escaped = s.slice(0, 4) + "\\u0047" + s.slice(5);
+  assert.deepEqual(paths(bytes(`{"k":"${escaped}"}`), s), { parsed: true, count: 0, paths: [] }, "an escape inside the SAID");
+  assert.deepEqual(paths(bytes(`{"k":"${s}\\u0041"}`), s), { parsed: true, count: 1, paths: ["/k"] }, "an escape after the SAID");
+  assert.deepEqual(paths(bytes(`{"${s}":1,"${s}":2}`), s), { parsed: true, count: 2, paths: [`/${s}`, `/${s}`] }, "duplicate keys");
+});
+
 test("paths: too deep or not JSON gives the count and no paths", () => {
   const s = "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB";
   const deep = "[".repeat(100_000) + `"${s}"` + "]".repeat(100_000);
