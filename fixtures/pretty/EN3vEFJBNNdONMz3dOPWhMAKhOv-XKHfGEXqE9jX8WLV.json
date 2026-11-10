@@ -1,0 +1,9 @@
+{
+  "d": "EN3vEFJBNNdONMz3dOPWhMAKhOv-XKHfGEXqE9jX8WLV",
+  "kind": "aggregate",
+  "alias": "application",
+  "schema": {
+    "type": "object",
+    "properties": {}
+  }
+}
