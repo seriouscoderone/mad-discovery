@@ -139,3 +139,68 @@ test("introductions and definitions limits are applied and recorded", async () =
   assert.deepEqual(r2.result.written, all, "the start gives four, then each introduced source gives four: every SAID is still written");
   assert.ok(r2.result.unresolved.some((u) => u.address === aAddr && u.reason === "truncated" && u.limit === "definitions"), "the start reached its limit");
 });
+
+test("a host used up mid-get keeps what it supplied, gets one timed-out, and the cut SAID goes to the next lister or is missing", async () => {
+  const all = closure(SELECTION);
+  const first = appearances(inputs.get(SELECTION)!, SELECTION)[0]!;
+  const defs = (o: Origin) => o.requests.filter((p) => p.startsWith("mad/definitions/"));
+  // The start serves the whole fixture folder, so its source.json (and so the budget) leaves b room for the rest of the closure.
+  const budget = (plan: { files: Map<string, Uint8Array> }) => plan.files.get("source.json")!.length + inputs.get(SELECTION)!.length + inputs.get(first)!.length + 10;
+
+  // With a next lister: a supplies two definitions, its third is cut by its host's bytes, and b supplies everything else.
+  const [a, b] = [await start(), await start()];
+  const bAddr = `${b.origin}/mad/source.json`;
+  b.source("mad/", { serve: [SELECTION] }, inputs);
+  const { address: aAddr, plan } = a.source("mad/", { serve: [...inputs.keys()], introductions: [{ source: bAddr }] }, inputs);
+  const r = await get(SELECTION, aAddr, session({ hostBytes: budget(plan) }));
+  assert.ok(r.ok, JSON.stringify(r));
+  if (!r.ok) return;
+  assert.deepEqual(r.result.unresolved, [{ address: aAddr, via: [], reason: "timed-out" }]);
+  assert.equal(defs(a).length, 3, "two definitions supplied, the third cut, nothing asked after it");
+  const cut = defs(a)[2]!.slice("mad/definitions/".length, -5);
+  assert.ok(r.files.has(`${SELECTION}.json`) && r.files.has(`${first}.json`), "what a supplied before the cut is kept");
+  assert.ok(defs(b).includes(`mad/definitions/${cut}.json`), "the cut SAID went to the next lister");
+  assert.ok(!defs(b).includes(`mad/definitions/${SELECTION}.json`) && !defs(b).includes(`mad/definitions/${first}.json`), "b was not asked for what a supplied");
+  assert.deepEqual(r.result.written, all);
+  assert.deepEqual(r.result.missing, []);
+
+  // With no next lister: the same cut, the files kept, and every SAID still queued is missing, looked for at the start only.
+  const c = await start();
+  const { address: cAddr, plan: cPlan } = c.source("mad/", { serve: [...inputs.keys()] }, inputs);
+  const r2 = await get(SELECTION, cAddr, session({ hostBytes: budget(cPlan) }));
+  assert.ok(r2.ok, JSON.stringify(r2));
+  if (!r2.ok) return;
+  assert.deepEqual(r2.result.unresolved, [{ address: cAddr, via: [], reason: "timed-out" }]);
+  assert.equal(defs(c).length, 3);
+  assert.deepEqual(r2.result.written, [SELECTION, first].sort());
+  assert.ok(r2.result.missing.length > 0 && r2.result.missing.some((m) => m.said === cut), "the cut SAID is missing");
+  for (const m of r2.result.missing) { assert.deepEqual(m.looked, [cAddr]); assert.ok(all.includes(m.said), m.said); }
+
+  // An introduced source on a host already used up is skipped with the limit's name, and asked nothing.
+  const d = await start();
+  const dIntroAddr = `${d.origin}/other/source.json`;
+  d.source("other/", { serve: [SELECTION] }, inputs);
+  const { address: dAddr, plan: dPlan } = d.source("mad/", { serve: [SELECTION], introductions: [{ source: dIntroAddr }] }, inputs);
+  const r3 = await get(SELECTION, dAddr, session({ hostBytes: dPlan.files.get("source.json")!.length }));
+  assert.ok(!r3.ok);
+  assert.deepEqual(r3.unresolved, [{ address: dIntroAddr, via: [dAddr], reason: "skipped", limit: "host-bytes" }, { address: dAddr, via: [], reason: "timed-out" }]);
+  assert.deepEqual(d.requests, ["mad/source.json"], "the start's source.json used the host up; nothing more was asked");
+});
+
+test("wrong bytes on the request that uses a host up are a failed check there, not retried at the next lister", async () => {
+  const first = appearances(inputs.get(SELECTION)!, SELECTION)[0]!;
+  const wrong = new TextEncoder().encode(`{"d":"${first}"}`);
+  const [a, b] = [await start(), await start()];
+  const bAddr = `${b.origin}/mad/source.json`;
+  b.source("mad/", { serve: [SELECTION] }, inputs);
+  const { address: aAddr, plan } = a.source("mad/", { serve: [...inputs.keys()], introductions: [{ source: bAddr }] }, inputs);
+  a.put(`mad/definitions/${first}.json`, wrong);
+  // The wrong bytes arrive whole and bring a's host exactly to its byte budget: the fetch is ok, and the host is used up after it.
+  const hostBytes = plan.files.get("source.json")!.length + inputs.get(SELECTION)!.length + wrong.length;
+  const r = await get(SELECTION, aAddr, session({ hostBytes }));
+  assert.ok(r.ok, JSON.stringify(r));
+  if (!r.ok) return;
+  assert.deepEqual(r.result.unresolved, [{ address: aAddr, via: [], reason: "timed-out" }, { address: aAddr, via: [], reason: "failed-check", said: first }]);
+  assert.ok(!r.files.has(`${first}.json`));
+  assert.ok(!b.requests.includes(`mad/definitions/${first}.json`), "a listed it and failed the check, so b was not asked");
+});

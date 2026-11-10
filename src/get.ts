@@ -72,7 +72,7 @@ export async function get(said: string, from: string, session: Session): Promise
       // The host's time or bytes ran out: one entry for the source, nothing more asked of it; the SAID goes back to the queue for the next lister.
       holder.exhausted = true;
       unresolved.push({ address: holder.address, via: holder.via, reason: "timed-out" });
-      if (g.outcome !== "ok" || !checkSaid(g.bytes, target)) { queue.unshift(target); continue; }
+      if (g.outcome === "timed-out") { queue.unshift(target); continue; }
     }
     if (g.outcome !== "ok") { unresolved.push({ address: holder.address, via: holder.via, reason: g.outcome, said: target, ...redirectTarget(g) }); continue; }
     if (!checkSaid(g.bytes, target)) { unresolved.push({ address: holder.address, via: holder.via, reason: "failed-check", said: target }); continue; }
