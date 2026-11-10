@@ -47,6 +47,12 @@ export function depth(text: string): number {
   return max;
 }
 
+/** JSON.parse, refused before it starts when the nesting is deeper than PATH_LIMITS.maxDepth. */
+export function parseBounded(bytes: Uint8Array): { ok: true; value: unknown } | { ok: false } {
+  if (depth(latin1(bytes)) > PATH_LIMITS.maxDepth) return { ok: false };
+  try { return { ok: true, value: JSON.parse(Buffer.from(bytes).toString("utf8")) }; } catch { return { ok: false }; }
+}
+
 const escapePointer = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
 
 type Frame =
@@ -58,8 +64,7 @@ export function paths(bytes: Uint8Array, said: string): { parsed: boolean; count
   const text = latin1(bytes);
   const occs = occurrences(text).filter((o) => o.said === said);
   const count = occs.length;
-  if (!isSaid(said) || depth(text) > PATH_LIMITS.maxDepth) return { parsed: false, count, paths: [] };
-  try { JSON.parse(Buffer.from(bytes).toString("utf8")); } catch { return { parsed: false, count, paths: [] }; }
+  if (!isSaid(said) || !parseBounded(bytes).ok) return { parsed: false, count, paths: [] };
   // Valid JSON from here: walk its tokens once, iteratively, and give each occurrence the pointer of the string token around it.
   const out: string[] = [];
   const stack: Frame[] = [];

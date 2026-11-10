@@ -1,6 +1,6 @@
 import { isSaid } from "./said.ts";
-import { paths, depth, PATH_LIMITS } from "./scan.ts";
-import { definitionAddress, parseCatalogAddress } from "./address.ts";
+import { paths, parseBounded } from "./scan.ts";
+import { definitionAddress, parseCatalogAddress, parseSourceAddress, parseHttpsAddress } from "./address.ts";
 import type { Publication, SourceDocument } from "./source.ts";
 
 export type PagesInput = {
@@ -48,12 +48,18 @@ function pageLink(said: string, fromIndex: boolean): string {
   return `<a href="${fromIndex ? "" : "../"}${said}/index.html"><code>${said}</code></a>`;
 }
 
-/** The definition's content as an outline. Strings that are served SAIDs become links; everything else is text. */
-function outline(value: unknown, served: Set<string>): string {
-  if (typeof value === "string") return isSaid(value) && served.has(value) ? pageLink(value, false) : `<span>${escapeHtml(value)}</span>`;
+/** A link to an address that passed the address rule; null (it did not) is refused. */
+function addressLink(address: string | null, text: string): string {
+  if (address === null) throw new Error("not an address");
+  return `<a href="${escapeHtml(address)}">${escapeHtml(text)}</a>`;
+}
+
+/** The definition's content as an outline. Strings that are linkable SAIDs become links; everything else is text. */
+function outline(value: unknown, linkable: Set<string>): string {
+  if (typeof value === "string") return isSaid(value) && linkable.has(value) ? pageLink(value, false) : `<span>${escapeHtml(value)}</span>`;
   if (value === null || typeof value !== "object") return `<span>${escapeHtml(String(value))}</span>`;
-  if (Array.isArray(value)) return `<ol>${value.map((v) => `<li>${outline(v, served)}</li>`).join("")}</ol>`;
-  return `<dl>${Object.entries(value as Record<string, unknown>).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${outline(v, served)}</dd>`).join("")}</dl>`;
+  if (Array.isArray(value)) return `<ol>${value.map((v) => `<li>${outline(v, linkable)}</li>`).join("")}</ol>`;
+  return `<dl>${Object.entries(value as Record<string, unknown>).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${outline(v, linkable)}</dd>`).join("")}</dl>`;
 }
 
 function offered(p: Publication, sourceBy: string | undefined): string {
@@ -73,23 +79,17 @@ function definitionPage(said: string, input: PagesInput, served: Set<string>): s
   const text = Buffer.from(bytes).toString("utf8");
   const linkable = new Set(served);
   linkable.delete(said);                                  // a page does not link to itself
-  let content: string;
-  if (depth(text) > PATH_LIMITS.maxDepth) {               // too deep for an outline (and for a recursive walk): shown as text
-    content = `<pre>${escapeHtml(text)}</pre>`;
-  } else {
-    try { content = outline(JSON.parse(text), linkable); }
-    catch { content = `<pre>${escapeHtml(text)}</pre>`; }
-  }
+  const parsed = parseBounded(bytes);                     // not JSON, or too deep for a recursive walk: shown as text
+  const content = parsed.ok ? outline(parsed.value, linkable) : `<pre>${escapeHtml(text)}</pre>`;
 
   const containers = document.serves.filter((s) => s.refers.includes(said)).map((s) => {
     const where = paths(definitions.get(s.said)!, said);
     return `<li>${pageLink(s.said, false)}${where.paths.length > 0 ? ` at ${where.paths.map((p) => `<code>${escapeHtml(p)}</code>`).join(", ")}` : ""}${where.count > where.paths.length ? ` (${where.count} appearances)` : ""}</li>`;
   });
-  const introductions = document.introductions.filter((i) => i.for.includes(said)).map((i) => `<li><a href="${escapeHtml(i.source)}">${escapeHtml(i.source)}</a></li>`);
+  const introductions = document.introductions.filter((i) => i.for.includes(said)).map((i) => `<li>${addressLink(parseSourceAddress(i.source)?.address ?? null, i.source)}</li>`);
   const catalogs = document.catalogs.map((c) => {
-    const parsedCatalog = parseCatalogAddress(c)!;
-    const href = `${parsedCatalog.base}pages/${said}/index.html`;
-    return `<li><a href="${escapeHtml(href)}">${escapeHtml(c)}</a></li>`;
+    const cat = parseCatalogAddress(c);
+    return `<li>${addressLink(cat === null ? null : `${cat.base}pages/${said}/index.html`, c)}</li>`;
   });
 
   const body = `<header><p><a href="../index.html">This source</a></p><h1>${escapeHtml(title)}</h1></header>
@@ -102,7 +102,7 @@ ${pubs.map((p) => offered(p, document.by)).join("\n")}
 <section><h2>Catalogs</h2>${catalogs.length > 0 ? `<ul>${catalogs.join("")}</ul>` : "<p>None named.</p>"}</section>
 </main>
 <footer><p>Served at <code>${escapeHtml(address)}</code>. A page is a rendering and is evidence of nothing; the check runs on the bytes.</p></footer>`;
-  return shell(title, "../style.css", body);
+  return shell(pubs[0] ? `${title} ${said}` : said, "../style.css", body);
 }
 
 function indexPage(input: PagesInput): string {
@@ -112,7 +112,7 @@ function indexPage(input: PagesInput): string {
     const name = pubs[0]?.name;
     return `<li>${pageLink(s.said, true)}${name !== undefined ? ` ${escapeHtml(name)}` : ""}</li>`;
   });
-  const by = document.by !== undefined ? `<p>Run by: <code>${escapeHtml(document.by)}</code>${document.oobi !== undefined ? ` (<a href="${escapeHtml(document.oobi)}">${escapeHtml(document.oobi)}</a>)` : ""}</p>` : "";
+  const by = document.by !== undefined ? `<p>Run by: <code>${escapeHtml(document.by)}</code>${document.oobi !== undefined ? ` (${addressLink(parseHttpsAddress(document.oobi), document.oobi)})` : ""}</p>` : "";
   const body = `<header><h1>Definitions served here</h1><p>Source document: <code>${escapeHtml(document.source)}</code></p>${by}</header>
 <main><ul>${items.join("")}</ul></main>`;
   return shell("Definitions served here", "style.css", body);

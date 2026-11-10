@@ -11,9 +11,10 @@ import { saidOf } from "../src/said.ts";
 import type { SourceDocument } from "../src/source.ts";
 
 const fixtures = new URL("../fixtures/", import.meta.url);
-const gymPlan = () => {
+const gymConfig = () => readFileSync(new URL("gym-config.json", fixtures), "utf8");
+const gymPlan = (config = gymConfig()) => {
   const d = mkdtempSync(join(tmpdir(), "gym-")); cpSync(new URL("pretty/", fixtures), d, { recursive: true });
-  return planBuild(readInputs(d).inputs, parseConfig(readFileSync(new URL("gym-config.json", fixtures), "utf8")));
+  return planBuild(readInputs(d).inputs, parseConfig(config));
 };
 const text = (b: Uint8Array) => Buffer.from(b).toString("utf8");
 const ALLOWED_TAGS = /^<\/?(!doctype|html|head|meta|title|link|body|header|main|nav|section|h1|h2|h3|p|a|ul|ol|li|dl|dt|dd|code|pre|span|footer)\b/i;
@@ -35,6 +36,8 @@ test("what a page shows", () => {
   const [selection] = plan.document.publications;
   const page = text(plan.files.get(`pages/${selection!.target}/index.html`)!);
   assert.ok(page.includes(escapeHtml(selection!.description)));
+  assert.ok(page.includes(`<title>${escapeHtml(selection!.name)} ${selection!.target}</title>`), "the title carries the SAID");
+  assert.ok(!page.includes(`href="../${selection!.target}/index.html"`), "no self-link");
   const entry = plan.document.serves.find((s) => s.said === selection!.target)!;
   for (const inner of entry.refers) assert.ok(page.includes(`href="../${inner}/index.html"`), `links ${inner}`);
   const contained = plan.document.serves.find((s) => s.refers.length > 0 && plan.document.serves.some((o) => o.refers.includes(s.said)))!;
@@ -85,4 +88,33 @@ test("a definition too deep for an outline is shown as text and still has a page
   const page = files.get(`pages/${said}/index.html`)!;
   assert.ok(page.includes("<pre>"), "shown as text");
   assert.ok(!page.includes("<ol>"), "not as an outline");
+});
+
+test("a source's by is shown on a published definition's page", () => {
+  const plan = gymPlan(JSON.stringify({ ...JSON.parse(gymConfig()), by: "EKxy" }));
+  const [selection] = plan.document.publications;
+  const page = text(plan.files.get(`pages/${selection!.target}/index.html`)!);
+  assert.ok(page.includes("Offered by: <code>EKxy</code>"));
+});
+
+const oneServed = (content: string) => {
+  const said = saidOf(new TextEncoder().encode(content));
+  const bytes = new TextEncoder().encode(content.replace("#".repeat(44), said));
+  return { said, definitions: new Map([[said, bytes]]) };
+};
+
+test("a link target that is not an address is refused", () => {
+  const { said, definitions } = oneServed(JSON.stringify({ d: "#".repeat(44) }));
+  const doc = (introductions: SourceDocument["introductions"], catalogs: string[]): SourceDocument =>
+    ({ source: "https://x.example/mad/source.json", pages: true, serves: [{ said, refers: [] }], publications: [], introductions, catalogs });
+  assert.throws(() => renderPages({ document: doc([{ source: "javascript:alert(1)", for: [said] }], []), base: "https://x.example/mad/", definitions }), /not an address/);
+  assert.throws(() => renderPages({ document: doc([], ["nope"]), base: "https://x.example/mad/", definitions }), /not an address/);
+});
+
+test("a definition that is not JSON is shown as text", () => {
+  const { said, definitions } = oneServed(`(define ${"#".repeat(44)})`);
+  const document: SourceDocument = { source: "https://x.example/mad/source.json", pages: true, serves: [{ said, refers: [] }], publications: [], introductions: [], catalogs: [] };
+  const page = renderPages({ document, base: "https://x.example/mad/", definitions }).get(`pages/${said}/index.html`)!;
+  assert.ok(page.includes("<pre>(define"));
+  assert.ok(!page.includes("<dl>"));
 });
