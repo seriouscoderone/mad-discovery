@@ -74,7 +74,7 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
   return {
     files,
     document: ordered,
-    unserved: [...unserved].sort().map(([said, from]) => ({ said, appearsIn: [...from].sort() })).filter((u) => !introducedFor.has(u.said)),
+    unserved: [...unserved.keys()].sort().map((said) => ({ said, appearsIn: [...unserved.get(said)!].sort() })).filter((u) => !introducedFor.has(u.said)),
     robotsLine: `Mad-Source: ${config.source.address}`,
     sitemapLine: `Sitemap: ${config.source.base}sitemap.xml`,
   };
@@ -88,8 +88,12 @@ function orderDocument(d: SourceDocument): SourceDocument {
   out.pages = d.pages ?? false;
   out.serves = d.serves;
   out.publications = d.publications.map((p) => {
-    const q: typeof p = { target: p.target, name: p.name, description: p.description, tags: p.tags, collection: p.collection };
+    const q = { target: p.target } as typeof p;
     if (p.by !== undefined) q.by = p.by;
+    q.name = p.name;
+    q.description = p.description;
+    q.tags = p.tags;
+    q.collection = p.collection;
     return q;
   });
   out.introductions = d.introductions;

@@ -79,3 +79,21 @@ test("writePlan needs an absent or empty folder and writes every file", () => {
   writeFileSync(join(out, "stray.txt"), "x");
   assert.throws(() => writePlan(plan, out), /not empty/);
 });
+
+test("a publication's by is its second member", () => {
+  const cfg = JSON.parse(gymConfig);
+  cfg.publications[0].by = "EKxy";
+  const plan = planBuild(readInputs(gymDir()).inputs, parseConfig(JSON.stringify(cfg)));
+  assert.deepEqual(Object.keys(plan.document.publications[0]!), ["target", "by", "name", "description", "tags", "collection"]);
+});
+
+test("a source.json over 1 MB is refused", () => {
+  const cfg = JSON.parse(gymConfig);
+  const first = cfg.publications[0];
+  cfg.publications = Array.from({ length: 600 }, () => ({ ...first, description: "x".repeat(2000) }));
+  const { inputs } = readInputs(gymDir());
+  assert.throws(
+    () => planBuild(inputs, parseConfig(JSON.stringify(cfg))),
+    (e: unknown) => e instanceof BuildError && e.problems.join("\n").includes("source.json"),
+  );
+});
