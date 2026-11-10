@@ -1,0 +1,42 @@
+{
+  "source": "https://mad.seriouscoder.one/source.json",
+  "serve": [
+    "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY",
+    "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4",
+    "EJfIK_QhDYXcEpciRPUZhVc4ChUEh2EJLAZfn5veZUqL"
+  ],
+  "publications": [
+    {
+      "target": "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY",
+      "name": "class-brick",
+      "description": "Test data from gym-bp: the class-brick selection.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    },
+    {
+      "target": "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4",
+      "name": "dropin-class",
+      "description": "Test data from gym-bp: the dropin-class selection.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    },
+    {
+      "target": "EJfIK_QhDYXcEpciRPUZhVc4ChUEh2EJLAZfn5veZUqL",
+      "name": "member-class",
+      "description": "Test data from gym-bp: the member-class selection.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    }
+  ],
+  "introductions": [],
+  "catalogs": []
+}
