@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use beads-superpowers:subagent-driven-development (recommended) or beads-superpowers:executing-plans to implement this plan task-by-task. Each Task becomes a bead (`bd create -t task --parent bpm-5g1`). Steps within tasks use checkbox (`- [ ]`) syntax for human readability.
 
+**Executed 2026-11-09.** All eleven tasks were implemented by subagents, each reviewed, with fix rounds where a review found a defect, then a final review of the whole step and one fix pass (bead bpm-5g1.25). The code blocks below were updated where that changed them, so this plan matches the code as built at commit `d3f453d`; the notes marked "added at execution" say what changed and why.
+
 **Goal:** A TypeScript tool that turns a folder of frozen definitions plus one configuration file into a source: `source.json`, the definitions' compact bytes, a readable page per definition, an index page, a stylesheet and a sitemap, every file checked against its SAID before it is written; plus `verify <file> <SAID>`.
 
 **Architecture:** One package, run from a checkout with Node 24 stripping types; no bundler, no build step, no server. Small modules with one job each (`said`, `compact`, `scan`, `address`, `source`, `config`, `inputs`, `build`, `pages`, `cli`), tested with `node --test` against committed outside fixtures. Everything is computed in memory and written only when every check passes.
@@ -603,6 +605,7 @@ test("compact input is unchanged", () => {
 test("strings are untouched", () => {
   const text = '{ "a" : "x  y \\" z" ,\n "b" : [ 1 , 2.0 ] }';
   assert.equal(Buffer.from(compactJson(Buffer.from(text))).toString(), '{"a":"x  y \\" z","b":[1,2.0]}');
+  assert.equal(Buffer.from(compactJson(Buffer.from('{ "a" : "x\\\\" , "b" : 1 }'))).toString(), '{"a":"x\\\\","b":1}');
 });
 
 test("why parse-then-stringify is not used", () => {
@@ -798,6 +801,12 @@ export function depth(text: string): number {
   return max;
 }
 
+/** JSON.parse, refused before it starts when the nesting is deeper than PATH_LIMITS.maxDepth. */
+export function parseBounded(bytes: Uint8Array): { ok: true; value: unknown } | { ok: false } {
+  if (depth(latin1(bytes)) > PATH_LIMITS.maxDepth) return { ok: false };
+  try { return { ok: true, value: JSON.parse(Buffer.from(bytes).toString("utf8")) }; } catch { return { ok: false }; }
+}
+
 const escapePointer = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
 
 type Frame =
@@ -809,8 +818,7 @@ export function paths(bytes: Uint8Array, said: string): { parsed: boolean; count
   const text = latin1(bytes);
   const occs = occurrences(text).filter((o) => o.said === said);
   const count = occs.length;
-  if (!isSaid(said) || depth(text) > PATH_LIMITS.maxDepth) return { parsed: false, count, paths: [] };
-  try { JSON.parse(Buffer.from(bytes).toString("utf8")); } catch { return { parsed: false, count, paths: [] }; }
+  if (!isSaid(said) || !parseBounded(bytes).ok) return { parsed: false, count, paths: [] };
   // Valid JSON from here: walk its tokens once, iteratively, and give each occurrence the pointer of the string token around it.
   const out: string[] = [];
   const stack: Frame[] = [];
@@ -1037,6 +1045,7 @@ git push
 **Acceptance Criteria:**
 - `fixtures/gym-config.json` parses; a configuration with an unknown member, a missing `source`, a `by` that is not an AID, a `serve` entry that is not a SAID, or a publication over a limit or holding a control character is refused with a problem naming the member.
 - `readInputs` over a copy of `fixtures/pretty/` returns compact verified bytes for every file; a file not named by a SAID, a file whose bytes do not verify even after whitespace removal, and a file over 1 MB are refused by name with a reason.
+- An entry whose name starts with `.` is skipped without a refusal; a file that cannot be read is refused by name with the error's code.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1074,6 +1083,8 @@ test("refusals name the member", () => {
   assert.match(problems({ ...base, publications: [{ ...pub, by: "ok-aid", other: 1 }] }).join(), /unknown member: other/);
   assert.match(problems({ ...base, introductions: [{ source: "https://x.example/mad/other.json", for: [] }] }).join(), /introductions\[0\].source/);
   assert.match(problems({ ...base, catalogs: ["https://x.example/c/source.json"] }).join(), /catalogs\[0\]/);
+  assert.match(problems({ ...base, introductions: [[1]] }).join(), /introductions\[0\] is not an object/);
+  assert.match(problems({ ...base, publications: [{ ...pub, target: "nope" }] }).join(), /target is not a SAID/);
   assert.deepEqual(problems({ ...base, by: "EKxy", oobi: "https://x.example/oobi/EKxy", publications: [{ ...pub, by: "EKxy" }] }), []);
 });
 ```
@@ -1083,7 +1094,7 @@ test("refusals name the member", () => {
 ```ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, cpSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, cpSync, writeFileSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readInputs } from "../src/inputs.ts";
@@ -1114,6 +1125,29 @@ test("refusals are by name with a reason", () => {
   assert.match(refused.find((r) => r.file.startsWith("EGQ3"))!.reason, /does not verify/);
   assert.match(refused.find((r) => r.file.startsWith("EAAA"))!.reason, /1 MB/);
 });
+
+test("dot-files in the folder are skipped, not refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inputs-"));
+  cpSync(pretty, dir, { recursive: true });
+  const count = readdirSync(dir).length;
+  writeFileSync(join(dir, ".DS_Store"), "junk");
+  const { inputs, refused } = readInputs(dir);
+  assert.deepEqual(refused, []);
+  assert.equal(inputs.size, count);
+});
+
+test("a file that cannot be read is a named refusal and the rest is still read", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inputs-"));
+  cpSync(pretty, dir, { recursive: true });
+  const count = readdirSync(dir).length;
+  const dangling = "EB" + "A".repeat(42) + ".json";
+  symlinkSync("/nonexistent", join(dir, dangling));
+  const { inputs, refused } = readInputs(dir);
+  assert.equal(inputs.size, count);
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0]!.file, dangling);
+  assert.match(refused[0]!.reason, /cannot be read/);
+});
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -1125,6 +1159,8 @@ Expected: FAIL, modules not found.
 
 ```ts
 /** The source document and its records, as docs/design.md defines them. */
+import { isSaid } from "./said.ts";
+
 export const AID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export const LIMITS = {
@@ -1153,13 +1189,13 @@ export type SourceDocument = {
 // C0 and C1 control characters, which must not reach a terminal or a page.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
-export function hasControlCharacters(s: string): boolean {
+function hasControlCharacters(s: string): boolean {
   return CONTROL.test(s);
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** A publication's shape and limits. The caller checks that target and by match their patterns. */
+/** A publication's shape, limits and patterns. */
 export function validatePublication(value: unknown): { ok: true; publication: Publication } | { ok: false; problem: string } {
   if (!isRecord(value)) return { ok: false, problem: "not an object" };
   const allowed = new Set(["target", "by", "name", "description", "tags", "collection"]);
@@ -1171,13 +1207,13 @@ export function validatePublication(value: unknown): { ok: true; publication: Pu
     if (hasControlCharacters(v)) return { problem: `${k} holds a control character` };
     return v;
   };
-  const target = text("target", 44); if (typeof target !== "string") return { ok: false, problem: target.problem };
+  const target = value["target"]; if (typeof target !== "string" || !isSaid(target)) return { ok: false, problem: "target is not a SAID" };
   const name = text("name", LIMITS.name); if (typeof name !== "string") return { ok: false, problem: name.problem };
   const description = text("description", LIMITS.description); if (typeof description !== "string") return { ok: false, problem: description.problem };
   const collection = text("collection", LIMITS.collection); if (typeof collection !== "string") return { ok: false, problem: collection.problem };
   const tags = value["tags"];
   if (!Array.isArray(tags) || tags.length > LIMITS.tags) return { ok: false, problem: `tags is not a list of at most ${LIMITS.tags}` };
-  for (const t of tags) if (typeof t !== "string" || t.length > LIMITS.tag || hasControlCharacters(t)) return { ok: false, problem: "a tag is not a string of at most 64 characters without control characters" };
+  for (const [i, t] of tags.entries()) if (typeof t !== "string" || t.length > LIMITS.tag || hasControlCharacters(t)) return { ok: false, problem: `tags[${i}] is not a string of at most 64 characters without control characters` };
   const publication: Publication = { target, name, description, tags: tags as string[], collection };
   if (value["by"] !== undefined) {
     if (typeof value["by"] !== "string" || !AID_PATTERN.test(value["by"])) return { ok: false, problem: "by is not an AID" };
@@ -1192,7 +1228,7 @@ export function validatePublication(value: unknown): { ok: true; publication: Pu
 ```ts
 import { isSaid } from "./said.ts";
 import { parseSourceAddress, parseCatalogAddress, parseHttpsAddress, type Address, type AddressOptions } from "./address.ts";
-import { AID_PATTERN, validatePublication, type Publication, type Introduction } from "./source.ts";
+import { AID_PATTERN, isRecord, validatePublication, type Publication, type Introduction } from "./source.ts";
 
 /** The operator's one authored input. Read strictly: an unknown member is a mistake, not an extension. */
 export type Config = {
@@ -1219,8 +1255,8 @@ export function parseConfig(text: string, opts: AddressOptions = {}): Config {
   const problems: string[] = [];
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { throw new ConfigError(["not JSON"]); }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new ConfigError(["not an object"]);
-  const r = raw as Record<string, unknown>;
+  if (!isRecord(raw)) throw new ConfigError(["not an object"]);
+  const r = raw;
   for (const k of Object.keys(r)) if (!ALLOWED.has(k)) problems.push(`unknown member: ${k}`);
 
   const source = typeof r["source"] === "string" ? parseSourceAddress(r["source"], opts) : null;
@@ -1249,14 +1285,13 @@ export function parseConfig(text: string, opts: AddressOptions = {}): Config {
   list("publications").forEach((v, i) => {
     const res = validatePublication(v);
     if (!res.ok) { problems.push(`publications[${i}]: ${res.problem}`); return; }
-    if (!isSaid(res.publication.target)) { problems.push(`publications[${i}].target is not a SAID`); return; }
     publications.push(res.publication);
   });
 
   const introductions: Introduction[] = [];
   list("introductions").forEach((v, i) => {
-    if (typeof v !== "object" || v === null) { problems.push(`introductions[${i}] is not an object`); return; }
-    const o = v as Record<string, unknown>;
+    if (!isRecord(v)) { problems.push(`introductions[${i}] is not an object`); return; }
+    const o = v;
     for (const k of Object.keys(o)) if (k !== "source" && k !== "for") problems.push(`introductions[${i}]: unknown member: ${k}`);
     const addr = typeof o["source"] === "string" ? parseSourceAddress(o["source"], opts) : null;
     if (addr === null) { problems.push(`introductions[${i}].source is not a source address`); return; }
@@ -1301,18 +1336,31 @@ export function readInputs(dir: string): { inputs: Inputs; refused: { file: stri
   const inputs: Inputs = new Map();
   const refused: { file: string; reason: string }[] = [];
   for (const file of readdirSync(dir).sort()) {
+    if (file.startsWith(".")) continue;
     const path = join(dir, file);
-    if (statSync(path).isDirectory()) continue;
+    let size: number;
+    try {
+      const st = statSync(path);
+      if (st.isDirectory()) continue;
+      size = st.size;
+    } catch (e) { refused.push({ file, reason: `cannot be read: ${errorText(e)}` }); continue; }
     if (!file.endsWith(".json") || !isSaid(file.slice(0, -5))) { refused.push({ file, reason: "not named by a SAID" }); continue; }
     const said = file.slice(0, -5);
-    if (statSync(path).size > LIMITS.file) { refused.push({ file, reason: "larger than 1 MB" }); continue; }
-    const raw = new Uint8Array(readFileSync(path));
+    if (size > LIMITS.file) { refused.push({ file, reason: "larger than 1 MB" }); continue; }
+    let raw: Uint8Array;
+    try { raw = new Uint8Array(readFileSync(path)); }
+    catch (e) { refused.push({ file, reason: `cannot be read: ${errorText(e)}` }); continue; }
     if (checkSaid(raw, said)) { inputs.set(said, raw); continue; }
     const compact = compactJson(raw);
     if (checkSaid(compact, said)) { inputs.set(said, compact); continue; }
     refused.push({ file, reason: "does not verify against its name, as given or with whitespace removed; supply the compact bytes the SAID was computed over" });
   }
   return { inputs, refused };
+}
+
+function errorText(e: unknown): string {
+  const code = (e as { code?: unknown }).code;
+  return typeof code === "string" ? code : e instanceof Error ? e.message : String(e);
 }
 ```
 
@@ -1491,7 +1539,7 @@ export function publicationsFor(document: SourceDocument, said: string): Publica
 - [ ] **Step 4: Write src/build.ts**
 
 ```ts
-import { mkdirSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { checkSaid } from "./said.ts";
 import { appearances } from "./scan.ts";
@@ -1528,15 +1576,17 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
   if (problems.length > 0) throw new BuildError(problems);
 
   const served = new Set<string>();
+  const refersOf = new Map<string, string[]>();
   const unserved = new Map<string, Set<string>>();
   const queue = [...start];
   while (queue.length > 0) {
     const said = queue.shift()!;
     if (served.has(said)) continue;
-    const bytes = inputs.get(said);
-    if (bytes === undefined) continue;
+    const bytes = inputs.get(said)!;
     served.add(said);
-    for (const inner of appearances(bytes, said)) {
+    const found = appearances(bytes, said);
+    refersOf.set(said, found);
+    for (const inner of found) {
       if (inputs.has(inner)) queue.push(inner);
       else { if (!unserved.has(inner)) unserved.set(inner, new Set()); unserved.get(inner)!.add(said); }
     }
@@ -1544,15 +1594,29 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
   const introducedFor = new Set(config.introductions.flatMap((i) => i.for));
 
   const saids = [...served].sort();
-  const serves: ServesEntry[] = saids.map((said) => ({ said, refers: appearances(inputs.get(said)!, said) }));
+  const serves: ServesEntry[] = saids.map((said) => ({ said, refers: refersOf.get(said)! }));
 
-  const document: SourceDocument = { source: config.source.address, serves, publications: config.publications, introductions: config.introductions, catalogs: config.catalogs, pages: true };
-  if (config.by !== undefined) document.by = config.by;
-  if (config.oobi !== undefined) document.oobi = config.oobi;
-  const ordered = orderDocument(document);
+  // Built once in a fixed member order, so two builds of one input are byte-identical.
+  const document: SourceDocument = {
+    source: config.source.address,
+    ...(config.by !== undefined ? { by: config.by } : {}),
+    ...(config.oobi !== undefined ? { oobi: config.oobi } : {}),
+    pages: true,
+    serves,
+    publications: config.publications.map((p) => ({
+      target: p.target,
+      ...(p.by !== undefined ? { by: p.by } : {}),
+      name: p.name,
+      description: p.description,
+      tags: p.tags,
+      collection: p.collection,
+    })),
+    introductions: config.introductions,
+    catalogs: config.catalogs,
+  };
 
   const files = new Map<string, Uint8Array>();
-  const sourceBytes = encoder.encode(JSON.stringify(ordered, null, 2) + "\n");
+  const sourceBytes = encoder.encode(JSON.stringify(document, null, 2) + "\n");
   if (sourceBytes.length > LIMITS.file) problems.push(`source.json would be ${sourceBytes.length} bytes, over 1 MB; split the source`);
   files.set("source.json", sourceBytes);
   for (const said of saids) {
@@ -1560,43 +1624,31 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
     if (!checkSaid(bytes, said)) problems.push(`definitions/${said}.json does not verify`);
     files.set(`definitions/${said}.json`, bytes);
   }
-  for (const [path, text] of renderPages({ document: ordered, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])) })) files.set(path, encoder.encode(text));
+  for (const [path, text] of renderPages({ document, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])) })) files.set(path, encoder.encode(text));
   files.set("sitemap.xml", encoder.encode(sitemapXml(config.source.base, saids)));
   if (problems.length > 0) throw new BuildError(problems);
 
   return {
     files,
-    document: ordered,
+    document,
     unserved: [...unserved.keys()].sort().map((said) => ({ said, appearsIn: [...unserved.get(said)!].sort() })).filter((u) => !introducedFor.has(u.said)),
     robotsLine: `Mad-Source: ${config.source.address}`,
     sitemapLine: `Sitemap: ${config.source.base}sitemap.xml`,
   };
 }
 
-/** A fixed member order, so two builds of one input are byte-identical. */
-function orderDocument(d: SourceDocument): SourceDocument {
-  const out: SourceDocument = { source: d.source } as SourceDocument;
-  if (d.by !== undefined) out.by = d.by;
-  if (d.oobi !== undefined) out.oobi = d.oobi;
-  out.pages = d.pages ?? false;
-  out.serves = d.serves;
-  out.publications = d.publications.map((p) => {
-    const q = { target: p.target } as typeof p;
-    if (p.by !== undefined) q.by = p.by;
-    q.name = p.name;
-    q.description = p.description;
-    q.tags = p.tags;
-    q.collection = p.collection;
-    return q;
-  });
-  out.introductions = d.introductions;
-  out.catalogs = d.catalogs;
-  return out;
+/** --out must be absent or an empty folder: null when it is, otherwise the problem. */
+export function outDirProblem(outDir: string): string | null {
+  let isDirectory: boolean;
+  try { isDirectory = statSync(outDir).isDirectory(); } catch { return null; }
+  if (!isDirectory) return `${outDir} is not a folder`;
+  return readdirSync(outDir).length > 0 ? `${outDir} is not empty` : null;
 }
 
-/** --out must be absent or empty. Writes every planned file, creating folders as needed. */
+/** Writes every planned file, creating folders as needed, after checking the out-folder rule. */
 export function writePlan(plan: BuildPlan, outDir: string): void {
-  if (existsSync(outDir) && readdirSync(outDir).length > 0) throw new Error(`${outDir} is not empty`);
+  const problem = outDirProblem(outDir);
+  if (problem !== null) throw new Error(problem);
   mkdirSync(outDir, { recursive: true });
   for (const [path, bytes] of plan.files) {
     const full = join(outDir, path);
@@ -1658,9 +1710,10 @@ import { saidOf } from "../src/said.ts";
 import type { SourceDocument } from "../src/source.ts";
 
 const fixtures = new URL("../fixtures/", import.meta.url);
-const gymPlan = () => {
+const gymConfig = () => readFileSync(new URL("gym-config.json", fixtures), "utf8");
+const gymPlan = (config = gymConfig()) => {
   const d = mkdtempSync(join(tmpdir(), "gym-")); cpSync(new URL("pretty/", fixtures), d, { recursive: true });
-  return planBuild(readInputs(d).inputs, parseConfig(readFileSync(new URL("gym-config.json", fixtures), "utf8")));
+  return planBuild(readInputs(d).inputs, parseConfig(config));
 };
 const text = (b: Uint8Array) => Buffer.from(b).toString("utf8");
 const ALLOWED_TAGS = /^<\/?(!doctype|html|head|meta|title|link|body|header|main|nav|section|h1|h2|h3|p|a|ul|ol|li|dl|dt|dd|code|pre|span|footer)\b/i;
@@ -1682,6 +1735,8 @@ test("what a page shows", () => {
   const [selection] = plan.document.publications;
   const page = text(plan.files.get(`pages/${selection!.target}/index.html`)!);
   assert.ok(page.includes(escapeHtml(selection!.description)));
+  assert.ok(page.includes(`<title>${escapeHtml(selection!.name)} ${selection!.target}</title>`), "the title carries the SAID");
+  assert.ok(!page.includes(`href="../${selection!.target}/index.html"`), "no self-link");
   const entry = plan.document.serves.find((s) => s.said === selection!.target)!;
   for (const inner of entry.refers) assert.ok(page.includes(`href="../${inner}/index.html"`), `links ${inner}`);
   const contained = plan.document.serves.find((s) => s.refers.length > 0 && plan.document.serves.some((o) => o.refers.includes(s.said)))!;
@@ -1733,6 +1788,35 @@ test("a definition too deep for an outline is shown as text and still has a page
   assert.ok(page.includes("<pre>"), "shown as text");
   assert.ok(!page.includes("<ol>"), "not as an outline");
 });
+
+test("a source's by is shown on a published definition's page", () => {
+  const plan = gymPlan(JSON.stringify({ ...JSON.parse(gymConfig()), by: "EKxy" }));
+  const [selection] = plan.document.publications;
+  const page = text(plan.files.get(`pages/${selection!.target}/index.html`)!);
+  assert.ok(page.includes("Offered by: <code>EKxy</code>"));
+});
+
+const oneServed = (content: string) => {
+  const said = saidOf(new TextEncoder().encode(content));
+  const bytes = new TextEncoder().encode(content.replace("#".repeat(44), said));
+  return { said, definitions: new Map([[said, bytes]]) };
+};
+
+test("a link target that is not an address is refused", () => {
+  const { said, definitions } = oneServed(JSON.stringify({ d: "#".repeat(44) }));
+  const doc = (introductions: SourceDocument["introductions"], catalogs: string[]): SourceDocument =>
+    ({ source: "https://x.example/mad/source.json", pages: true, serves: [{ said, refers: [] }], publications: [], introductions, catalogs });
+  assert.throws(() => renderPages({ document: doc([{ source: "javascript:alert(1)", for: [said] }], []), base: "https://x.example/mad/", definitions }), /not an address/);
+  assert.throws(() => renderPages({ document: doc([], ["nope"]), base: "https://x.example/mad/", definitions }), /not an address/);
+});
+
+test("a definition that is not JSON is shown as text", () => {
+  const { said, definitions } = oneServed(`(define ${"#".repeat(44)})`);
+  const document: SourceDocument = { source: "https://x.example/mad/source.json", pages: true, serves: [{ said, refers: [] }], publications: [], introductions: [], catalogs: [] };
+  const page = renderPages({ document, base: "https://x.example/mad/", definitions }).get(`pages/${said}/index.html`)!;
+  assert.ok(page.includes("<pre>(define"));
+  assert.ok(!page.includes("<dl>"));
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -1744,8 +1828,8 @@ Expected: FAIL (the stubs render one line per page).
 
 ```ts
 import { isSaid } from "./said.ts";
-import { paths, depth, PATH_LIMITS } from "./scan.ts";
-import { definitionAddress, parseCatalogAddress } from "./address.ts";
+import { paths, parseBounded } from "./scan.ts";
+import { definitionAddress, parseCatalogAddress, parseSourceAddress, parseHttpsAddress } from "./address.ts";
 import type { Publication, SourceDocument } from "./source.ts";
 
 export type PagesInput = {
@@ -1764,7 +1848,7 @@ export function escapeHtml(s: string): string {
     .replace(/[\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, (c) => `&#x${c.codePointAt(0)!.toString(16)};`);
 }
 
-export function publicationsFor(document: SourceDocument, said: string): Publication[] {
+function publicationsFor(document: SourceDocument, said: string): Publication[] {
   return document.publications.filter((p) => p.target === said);
 }
 
@@ -1793,12 +1877,18 @@ function pageLink(said: string, fromIndex: boolean): string {
   return `<a href="${fromIndex ? "" : "../"}${said}/index.html"><code>${said}</code></a>`;
 }
 
-/** The definition's content as an outline. Strings that are served SAIDs become links; everything else is text. */
-function outline(value: unknown, served: Set<string>): string {
-  if (typeof value === "string") return isSaid(value) && served.has(value) ? pageLink(value, false) : `<span>${escapeHtml(value)}</span>`;
+/** A link to an address that passed the address rule; null (it did not) is refused. */
+function addressLink(address: string | null, text: string): string {
+  if (address === null) throw new Error("not an address");
+  return `<a href="${escapeHtml(address)}">${escapeHtml(text)}</a>`;
+}
+
+/** The definition's content as an outline. Strings that are linkable SAIDs become links; everything else is text. */
+function outline(value: unknown, linkable: Set<string>): string {
+  if (typeof value === "string") return isSaid(value) && linkable.has(value) ? pageLink(value, false) : `<span>${escapeHtml(value)}</span>`;
   if (value === null || typeof value !== "object") return `<span>${escapeHtml(String(value))}</span>`;
-  if (Array.isArray(value)) return `<ol>${value.map((v) => `<li>${outline(v, served)}</li>`).join("")}</ol>`;
-  return `<dl>${Object.entries(value as Record<string, unknown>).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${outline(v, served)}</dd>`).join("")}</dl>`;
+  if (Array.isArray(value)) return `<ol>${value.map((v) => `<li>${outline(v, linkable)}</li>`).join("")}</ol>`;
+  return `<dl>${Object.entries(value as Record<string, unknown>).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${outline(v, linkable)}</dd>`).join("")}</dl>`;
 }
 
 function offered(p: Publication, sourceBy: string | undefined): string {
@@ -1818,23 +1908,17 @@ function definitionPage(said: string, input: PagesInput, served: Set<string>): s
   const text = Buffer.from(bytes).toString("utf8");
   const linkable = new Set(served);
   linkable.delete(said);                                  // a page does not link to itself
-  let content: string;
-  if (depth(text) > PATH_LIMITS.maxDepth) {               // too deep for an outline (and for a recursive walk): shown as text
-    content = `<pre>${escapeHtml(text)}</pre>`;
-  } else {
-    try { content = outline(JSON.parse(text), linkable); }
-    catch { content = `<pre>${escapeHtml(text)}</pre>`; }
-  }
+  const parsed = parseBounded(bytes);                     // not JSON, or too deep for a recursive walk: shown as text
+  const content = parsed.ok ? outline(parsed.value, linkable) : `<pre>${escapeHtml(text)}</pre>`;
 
   const containers = document.serves.filter((s) => s.refers.includes(said)).map((s) => {
     const where = paths(definitions.get(s.said)!, said);
     return `<li>${pageLink(s.said, false)}${where.paths.length > 0 ? ` at ${where.paths.map((p) => `<code>${escapeHtml(p)}</code>`).join(", ")}` : ""}${where.count > where.paths.length ? ` (${where.count} appearances)` : ""}</li>`;
   });
-  const introductions = document.introductions.filter((i) => i.for.includes(said)).map((i) => `<li><a href="${escapeHtml(i.source)}">${escapeHtml(i.source)}</a></li>`);
+  const introductions = document.introductions.filter((i) => i.for.includes(said)).map((i) => `<li>${addressLink(parseSourceAddress(i.source)?.address ?? null, i.source)}</li>`);
   const catalogs = document.catalogs.map((c) => {
-    const parsedCatalog = parseCatalogAddress(c)!;
-    const href = `${parsedCatalog.base}pages/${said}/index.html`;
-    return `<li><a href="${escapeHtml(href)}">${escapeHtml(c)}</a></li>`;
+    const cat = parseCatalogAddress(c);
+    return `<li>${addressLink(cat === null ? null : `${cat.base}pages/${said}/index.html`, c)}</li>`;
   });
 
   const body = `<header><p><a href="../index.html">This source</a></p><h1>${escapeHtml(title)}</h1></header>
@@ -1847,7 +1931,7 @@ ${pubs.map((p) => offered(p, document.by)).join("\n")}
 <section><h2>Catalogs</h2>${catalogs.length > 0 ? `<ul>${catalogs.join("")}</ul>` : "<p>None named.</p>"}</section>
 </main>
 <footer><p>Served at <code>${escapeHtml(address)}</code>. A page is a rendering and is evidence of nothing; the check runs on the bytes.</p></footer>`;
-  return shell(title, "../style.css", body);
+  return shell(pubs[0] ? `${title} ${said}` : said, "../style.css", body);
 }
 
 function indexPage(input: PagesInput): string {
@@ -1857,13 +1941,13 @@ function indexPage(input: PagesInput): string {
     const name = pubs[0]?.name;
     return `<li>${pageLink(s.said, true)}${name !== undefined ? ` ${escapeHtml(name)}` : ""}</li>`;
   });
-  const by = document.by !== undefined ? `<p>Run by: <code>${escapeHtml(document.by)}</code>${document.oobi !== undefined ? ` (<a href="${escapeHtml(document.oobi)}">${escapeHtml(document.oobi)}</a>)` : ""}</p>` : "";
+  const by = document.by !== undefined ? `<p>Run by: <code>${escapeHtml(document.by)}</code>${document.oobi !== undefined ? ` (${addressLink(parseHttpsAddress(document.oobi), document.oobi)})` : ""}</p>` : "";
   const body = `<header><h1>Definitions served here</h1><p>Source document: <code>${escapeHtml(document.source)}</code></p>${by}</header>
 <main><ul>${items.join("")}</ul></main>`;
   return shell("Definitions served here", "style.css", body);
 }
 
-export const STYLE_CSS = `body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:48rem;padding:1rem}
+const STYLE_CSS = `body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:48rem;padding:1rem}
 code,pre{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
 pre{background:#f4f4f4;padding:.5rem;white-space:pre-wrap}
 dl{margin:0 0 0 1rem}dt{font-weight:600}dd{margin:0 0 .25rem 1rem}
@@ -1910,7 +1994,7 @@ git push
 - Produces: `main(argv: string[], io: { out: (s: string) => void; err: (s: string) => void }): number` in `src/cli.ts`; `bin/mad-discovery.ts` runs it with `process.argv.slice(2)` and sets `process.exitCode`. Commands: `build <folder> --config <file> --out <folder>` and `verify <file> <SAID>`.
 
 **Acceptance Criteria:**
-- `node bin/mad-discovery.ts build <gym fixtures copy> --config fixtures/gym-config.json --out <new folder>` exits 0, writes the source, and prints one JSON object with `written`, `serves`, `unserved`, `refused`, `robots` and `sitemap`.
+- `node bin/mad-discovery.ts build <gym fixtures copy> --config fixtures/gym-config.json --out <new folder>` exits 0, writes the source, and prints one JSON object with `written`, `serves`, `unserved`, `robots` and `sitemap`.
 - The same command against a non-empty `--out`, a missing config, a config with an unknown member, or an input that does not verify exits 1, writes nothing, and names every problem in the JSON.
 - `verify <file> <SAID>` exits 0 and prints `{"verified":true,...}` for a compact fixture, exits 1 with the expected and computed SAID for a pretty copy, and exits 2 with a usage message when the SAID is missing or an address is given.
 - Standard output is ASCII-only JSON; a usage error goes to standard error and exits 2.
@@ -1923,10 +2007,11 @@ git push
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, cpSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { asciiJson } from "../src/cli.ts";
 
 const bin = fileURLToPath(new URL("../bin/mad-discovery.ts", import.meta.url));
 const fixtures = fileURLToPath(new URL("../fixtures/", import.meta.url));
@@ -1947,6 +2032,7 @@ test("build writes a source and reports", () => {
   assert.equal(r.json.sitemap, "Sitemap: https://gym.example/mad/sitemap.xml");
   assert.ok(/^[\x20-\x7e\n]*$/.test(r.out), "ASCII-only output");
   assert.equal(readdirSync(join(out, "definitions")).length, 26);
+  assert.ok(!("refused" in r.json), "a refusal exits 1, so success carries no refused list");
 });
 
 test("build refuses and writes nothing", () => {
@@ -1966,6 +2052,13 @@ test("build refuses and writes nothing", () => {
   r = run("build", gymDir(), "--config", join(fixtures, "gym-config.json"), "--out", full);
   assert.equal(r.code, 1);
   assert.ok(r.json.problems.some((p: string) => p.includes("not empty")));
+  assert.deepEqual(readdirSync(full), ["x"]);
+  const file = join(mkdtempSync(join(tmpdir(), "file-")), "site");
+  writeFileSync(file, "keep");
+  r = run("build", gymDir(), "--config", join(fixtures, "gym-config.json"), "--out", file);
+  assert.equal(r.code, 1);
+  assert.ok(r.json.problems.some((p: string) => p.includes("is not a folder")));
+  assert.equal(readFileSync(file, "utf8"), "keep");
 });
 
 test("verify a file", () => {
@@ -1984,6 +2077,24 @@ test("usage errors exit 2", () => {
   assert.equal(run("verify", "https://gym.example/mad/definitions/x.json", QVI).code, 2);
   assert.equal(run("nonsense").code, 2);
   assert.equal(run().code, 2);
+  const config = join(fixtures, "gym-config.json");
+  for (const args of [["build", gymDir(), "--out", "--config", config], ["build", gymDir(), "--config", "--out", "o"]]) {
+    const cwd = mkdtempSync(join(tmpdir(), "cwd-"));
+    const r = spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", cwd });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.ok(!existsSync(join(cwd, "--config")), "no --config folder written");
+    assert.deepEqual(readdirSync(cwd), [], "nothing written");
+  }
+});
+
+test("asciiJson escapes everything outside printable ASCII", () => {
+  const value = { a: "\u00e9\u007f\u{1F600}\u2028\u0001" };
+  const s = asciiJson(value);
+  assert.match(s, /^[\x20-\x7e\n]*$/);
+  assert.ok(s.includes("\\u00e9"));
+  assert.ok(s.includes("\\ud83d\\ude00"));
+  assert.ok(s.includes("\\u2028"));
+  assert.deepEqual(JSON.parse(s), value);
 });
 ```
 
@@ -1997,11 +2108,11 @@ Expected: FAIL (`bin/mad-discovery.ts` does not exist).
 `src/cli.ts`:
 
 ```ts
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { isSaid, checkSaid, saidOf, replaceAll, FILL } from "./said.ts";
 import { parseConfig, ConfigError } from "./config.ts";
 import { readInputs } from "./inputs.ts";
-import { planBuild, writePlan, BuildError } from "./build.ts";
+import { planBuild, writePlan, outDirProblem, BuildError } from "./build.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
 
@@ -2017,7 +2128,8 @@ export function asciiJson(value: unknown): string {
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] : undefined;
+  const value = i >= 0 ? args[i + 1] : undefined;
+  return value === undefined || value.startsWith("--") ? undefined : value;
 }
 
 export function main(argv: string[], io: Io): number {
@@ -2041,7 +2153,8 @@ function build(args: string[], io: Io): number {
     const config = parseConfig(configText);
     const { inputs, refused } = readInputs(folder);
     for (const r of refused) problems.push(`${r.file}: ${r.reason}`);
-    if (existsSync(out) && readdirSync(out).length > 0) problems.push(`${out} is not empty`);
+    const outProblem = outDirProblem(out);
+    if (outProblem !== null) problems.push(outProblem);
     if (problems.length > 0) { io.out(asciiJson({ problems }) + "\n"); return 1; }
     const plan = planBuild(inputs, config);
     writePlan(plan, out);
@@ -2049,7 +2162,6 @@ function build(args: string[], io: Io): number {
       written: plan.files.size,
       serves: plan.document.serves.map((s) => s.said),
       unserved: plan.unserved,
-      refused,
       robots: plan.robotsLine,
       sitemap: plan.sitemapLine,
     }) + "\n");
