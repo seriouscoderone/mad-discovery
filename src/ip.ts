@@ -51,8 +51,17 @@ const V4_REFUSED: [number, number][] = ([
   ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 3],
 ] as [string, number][]).map(([base, bits]) => [parseIPv4(base)!, bits]);
 
+type V6Prefix = { shift: bigint; top: bigint };
+const v6Prefix = (base: string, bits: number): V6Prefix => ({ shift: BigInt(128 - bits), top: parseIPv6(base)! >> BigInt(128 - bits) });
+
+// Parsed once: the two prefixes that carry IPv4, global unicast, and the protocol-assignment, documentation and 6to4 ranges inside it.
+const V6_MAPPED = v6Prefix("::ffff:0:0", 96);
+const V6_NAT64 = v6Prefix("64:ff9b::", 96);
+const V6_GLOBAL = v6Prefix("2000::", 3);
+const V6_REFUSED: V6Prefix[] = [v6Prefix("2001::", 23), v6Prefix("2001:db8::", 32), v6Prefix("2002::", 16)];
+
 const inV4 = (v: number, base: number, bits: number): boolean => (v >>> (32 - bits)) === (base >>> (32 - bits));
-const inV6 = (v: bigint, prefix: string, bits: number): boolean => (v >> BigInt(128 - bits)) === (parseIPv6(prefix)! >> BigInt(128 - bits));
+const inV6 = (v: bigint, p: V6Prefix): boolean => (v >> p.shift) === p.top;
 
 function isPublicIPv4(v: number): boolean {
   return !V4_REFUSED.some(([base, bits]) => inV4(v, base, bits));
@@ -65,8 +74,8 @@ export function isPublic(address: string): boolean {
   const v6 = parseIPv6(address);
   if (v6 === null) return false;
   // An IPv4 address carried inside IPv6 is judged by the IPv4 list, so IPv6-only readers still reach IPv4-only sources.
-  if (inV6(v6, "::ffff:0:0", 96) || inV6(v6, "64:ff9b::", 96)) return isPublicIPv4(Number(v6 & 0xffffffffn));
-  return inV6(v6, "2000::", 3) && !inV6(v6, "2001::", 23) && !inV6(v6, "2001:db8::", 32) && !inV6(v6, "2002::", 16);
+  if (inV6(v6, V6_MAPPED) || inV6(v6, V6_NAT64)) return isPublicIPv4(Number(v6 & 0xffffffffn));
+  return inV6(v6, V6_GLOBAL) && !V6_REFUSED.some((p) => inV6(v6, p));
 }
 
 /** 127/8 and ::1: what test code alone may connect to. */

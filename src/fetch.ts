@@ -26,7 +26,7 @@ export type FetchOptions = AddressOptions & {
 };
 
 /** c-ares through node:dns/promises, cancelled at the deadline: unlike dns.lookup its queries can be timed out and abandoned. */
-export const resolveNames: Resolve = async (hostname, timeoutMs) => {
+const resolveNames: Resolve = async (hostname, timeoutMs) => {
   const resolver = new Resolver({ timeout: Math.max(1, Math.ceil(timeoutMs)), tries: 1 });
   const timer = setTimeout(() => resolver.cancel(), timeoutMs);
   try {

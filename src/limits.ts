@@ -10,13 +10,16 @@ export type Limits = {
   sourcesPerRun: number;
   hostMs: number;                 // one host, all its sources and requests
   hostBytes: number;              // bytes read from one host
-  hostsInFlight: number;          // one request at a time per host
+  hostsInFlight: number;          // hosts fetched from at once; each host gets one request at a time whatever this is
   runMs: number | null;           // the whole run; null means no clock
 };
 
+/** A source document or a definition, as a file: the build refuses to write a larger one and a reader refuses to read one. */
+export const FILE_BYTES = 1_000_000;
+
 export const WALK: Limits = {
   requestMs: 10_000,
-  fileBytes: 1_000_000,
+  fileBytes: FILE_BYTES,
   definitionsPerSource: 50,
   introductionsPerSource: 10,
   introductionDepth: 3,
@@ -26,9 +29,6 @@ export const WALK: Limits = {
   hostsInFlight: 8,
   runMs: 120_000,
 };
-
-/** A source document or a definition, as a file: the build refuses to write a larger one and a reader refuses to read one. */
-export const FILE_BYTES = 1_000_000;
 
 /** JSON Pointer paths reported for one definition, and the nesting depth beyond which nothing is parsed. */
 export const PATH_LIMITS = { maxPaths: 16, maxLength: 256, maxDepth: 64 } as const;

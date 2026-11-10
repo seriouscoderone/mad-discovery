@@ -4,7 +4,7 @@ import { definitionAddress } from "./address.ts";
 import { readSource, redirectTarget, type Reason, type Unresolved } from "./read.ts";
 import { Session } from "./session.ts";
 import type { Dropped } from "./document.ts";
-import type { Introduction, Publication } from "./source.ts";
+import { byKey, type Introduction, type Publication } from "./source.ts";
 
 export type Report = {
   said: string;
@@ -48,7 +48,7 @@ const fresh = (c: Candidate): Visited => ({ address: c.address, via: c.via, fetc
  * SAID, collect its publications of the SAID, fetch and check each definition whose refers lists the SAID and confirm the
  * appearance by the scan. The document is fetched whole and matched here, so the SAID goes only to a source that lists it.
  */
-export async function visitSource(said: string, c: Candidate, session: Session): Promise<Visited> {
+async function visitSource(said: string, c: Candidate, session: Session): Promise<Visited> {
   const v = fresh(c);
   const host = Session.hostOf(c.address);
   const unresolved = (reason: Reason, more: Partial<Unresolved> = {}): void => { v.unresolved.push({ address: c.address, via: c.via, reason, ...more }); };
@@ -84,13 +84,13 @@ export async function visitSource(said: string, c: Candidate, session: Session):
   v.catalogs = document.catalogs;
   v.introductions = document.introductions.slice(0, session.limits.introductionsPerSource);
   if (document.introductions.length > v.introductions.length) unresolved("truncated", { limit: "introductions" });
-  const mentions = document.serves.some((s) => s.said === said || s.refers.includes(said)) || v.publications.length > 0;
+  const mentions = wanted.length > 0 || v.publications.length > 0;
   if (c.named && !mentions) unresolved("not-there");
   return v;
 }
 
 /** The report from every visit, in the order visited: depth, then address. */
-export function assemble(said: string, from: string, visits: Visited[], skipped: Unresolved[]): Report {
+function assemble(said: string, from: string, visits: Visited[], skipped: Unresolved[]): Report {
   const read = visits.filter((v) => v.read);
   return {
     said,
@@ -143,8 +143,6 @@ export function nextLevel(said: string, here: Visited[], visited: Set<string>): 
   return out;
 }
 
-const byAddress = (a: { address: string }, b: { address: string }): number => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0);
-
 /**
  * docs/design.md "The walk": breadth-first, every source at one depth before any at the next; within a depth the sources run under
  * the session's host scheduling and are merged in address order, so the report does not depend on who answered first.
@@ -158,7 +156,7 @@ export async function walk(said: string, from: string, session: Session): Promis
   for (let depth = 0; level.length > 0; depth++) {
     const here: Visited[] = [];
     await session.each(level, (c) => Session.hostOf(c.address), async (c) => { here.push(await visitSource(said, c, session)); });
-    here.sort(byAddress);
+    here.sort(byKey("address"));
     if (depth === 0 && !here[0]!.fetched) {
       const u = here[0]!.unresolved[0]!;
       return { ok: false, reason: u.reason, ...(u.target !== undefined ? { target: u.target } : {}) };

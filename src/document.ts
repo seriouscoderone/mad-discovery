@@ -1,13 +1,11 @@
 import { isSaid } from "./said.ts";
 import { parseBounded } from "./scan.ts";
 import { parseSourceAddress, parseCatalogAddress, parseHttpsAddress, type AddressOptions } from "./address.ts";
-import { AID_PATTERN, isRecord, validatePublication, type Introduction, type Publication, type ServesEntry, type SourceDocument } from "./source.ts";
+import { AID_PATTERN, PUBLICATION_MEMBERS, byKey, isRecord, validatePublication, type Introduction, type Publication, type ServesEntry, type SourceDocument } from "./source.ts";
 
 export type Dropped = { entries: number; publications: number };
 export type ReadDocument = { ok: true; document: SourceDocument; dropped: Dropped } | { ok: false };
 
-const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-const PUBLICATION_MEMBERS = new Set(["target", "by", "name", "description", "tags", "collection"]);
 
 /**
  * A fetched source document, read as docs/design.md "A source" says: `source` must equal the address it was fetched from, a known
@@ -36,7 +34,7 @@ export function readSourceDocument(bytes: Uint8Array, address: string, opts: Add
     if (!Array.isArray(refersRaw)) { dropped.entries++; continue; }
     const refers = new Set<string>();
     for (const s of refersRaw) { if (typeof s === "string" && isSaid(s) && s !== said && !refers.has(s)) refers.add(s); else dropped.entries++; }
-    serves.set(said, { said, refers: [...refers].sort(byString) });
+    serves.set(said, { said, refers: [...refers].sort() });
   }
 
   // A reader ignores a member it does not know, inside a publication too; the configuration's strictness is the operator's, not a stranger's.
@@ -56,7 +54,7 @@ export function readSourceDocument(bytes: Uint8Array, address: string, opts: Add
     if (!Array.isArray(forRaw)) { dropped.entries++; continue; }
     const fors = new Set<string>();
     for (const s of forRaw) { if (typeof s === "string" && isSaid(s) && !fors.has(s)) fors.add(s); else dropped.entries++; }
-    introductions.set(addr.address, { source: addr.address, for: [...fors].sort(byString) });
+    introductions.set(addr.address, { source: addr.address, for: [...fors].sort() });
   }
 
   const catalogs = new Set<string>();
@@ -68,10 +66,10 @@ export function readSourceDocument(bytes: Uint8Array, address: string, opts: Add
   const document: SourceDocument = {
     source: address,
     pages: r["pages"] === true,
-    serves: [...serves.values()].sort((a, b) => byString(a.said, b.said)),
+    serves: [...serves.values()].sort(byKey("said")),
     publications,
-    introductions: [...introductions.values()].sort((a, b) => byString(a.source, b.source)),
-    catalogs: [...catalogs].sort(byString),
+    introductions: [...introductions.values()].sort(byKey("source")),
+    catalogs: [...catalogs].sort(),
   };
   if (typeof r["by"] === "string") { if (AID_PATTERN.test(r["by"])) document.by = r["by"]; else dropped.entries++; }
   if (typeof r["oobi"] === "string") { const o = parseHttpsAddress(r["oobi"], opts); if (o !== null) document.oobi = o; else dropped.entries++; }

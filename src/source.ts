@@ -27,11 +27,16 @@ function hasControlCharacters(s: string): boolean {
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** Records in the order of one string member, by code unit, as a bare sort orders strings. */
+export const byKey = <K extends string>(key: K) => (a: Record<K, string>, b: Record<K, string>): number => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0);
+
+/** The members a publication may carry. */
+export const PUBLICATION_MEMBERS: ReadonlySet<string> = new Set(["target", "by", "name", "description", "tags", "collection"]);
+
 /** A publication's shape, limits and patterns. */
 export function validatePublication(value: unknown): { ok: true; publication: Publication } | { ok: false; problem: string } {
   if (!isRecord(value)) return { ok: false, problem: "not an object" };
-  const allowed = new Set(["target", "by", "name", "description", "tags", "collection"]);
-  for (const k of Object.keys(value)) if (!allowed.has(k)) return { ok: false, problem: `unknown member: ${k}` };
+  for (const k of Object.keys(value)) if (!PUBLICATION_MEMBERS.has(k)) return { ok: false, problem: `unknown member: ${k}` };
   const text = (k: string, max: number): string | { problem: string } => {
     const v = value[k];
     if (typeof v !== "string") return { problem: `${k} is not a string` };
@@ -45,7 +50,7 @@ export function validatePublication(value: unknown): { ok: true; publication: Pu
   const collection = text("collection", PUBLICATION.collection); if (typeof collection !== "string") return { ok: false, problem: collection.problem };
   const tags = value["tags"];
   if (!Array.isArray(tags) || tags.length > PUBLICATION.tags) return { ok: false, problem: `tags is not a list of at most ${PUBLICATION.tags}` };
-  for (const [i, t] of tags.entries()) if (typeof t !== "string" || t.length > PUBLICATION.tag || hasControlCharacters(t)) return { ok: false, problem: `tags[${i}] is not a string of at most 64 characters without control characters` };
+  for (const [i, t] of tags.entries()) if (typeof t !== "string" || t.length > PUBLICATION.tag || hasControlCharacters(t)) return { ok: false, problem: `tags[${i}] is not a string of at most ${PUBLICATION.tag} characters without control characters` };
   const publication: Publication = { target, name, description, tags: tags as string[], collection };
   if (value["by"] !== undefined) {
     if (typeof value["by"] !== "string" || !AID_PATTERN.test(value["by"])) return { ok: false, problem: "by is not an AID" };

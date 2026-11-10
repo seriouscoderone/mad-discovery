@@ -15,6 +15,8 @@ export type Io = { out: (s: string) => void; err: (s: string) => void };
 /** test, resolve and limits exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
 export type RunOptions = { test?: boolean; resolve?: Resolve; limits?: Limits };
 
+const FROM_NOTE = "--from must be a source address: https, a DNS name, a path ending in /source.json.";
+
 const USAGE = `usage:
   mad-discovery build <folder> --config <file> --out <folder>
   mad-discovery verify <file or address> <SAID>
@@ -121,7 +123,7 @@ async function who(args: string[], io: Io, options: RunOptions): Promise<number>
   const from = flag(args, "--from");
   if (said === undefined || !isSaid(said) || from === undefined) return usage(io, "The SAID must match the pattern and --from is required.");
   const start = parseSourceAddress(from, { test: options.test });
-  if (start === null) return usage(io, "--from must be a source address: https, a DNS name, a path ending in /source.json.");
+  if (start === null) return usage(io, FROM_NOTE);
   const r = await walk(said, start.address, session(options));
   if (!r.ok) {
     io.out(asciiJson({ said, from: start.address, problem: `the starting source could not be read: ${r.reason}`, ...(r.target !== undefined ? { target: r.target } : {}) }) + "\n");
@@ -137,7 +139,7 @@ async function bringHome(args: string[], io: Io, options: RunOptions): Promise<n
   const out = flag(args, "--out");
   if (said === undefined || !isSaid(said) || from === undefined || out === undefined) return usage(io, "The SAID must match the pattern; --from and --out are required.");
   const start = parseSourceAddress(from, { test: options.test });
-  if (start === null) return usage(io, "--from must be a source address: https, a DNS name, a path ending in /source.json.");
+  if (start === null) return usage(io, FROM_NOTE);
   const outProblem = outDirProblem(out);
   if (outProblem !== null) { io.out(asciiJson({ problems: [outProblem] }) + "\n"); return 1; }
   const r = await get(said, start.address, session(options));

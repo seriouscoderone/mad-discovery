@@ -3,7 +3,7 @@ import { appearances } from "./scan.ts";
 import { definitionAddress } from "./address.ts";
 import { readSource, redirectTarget, type ReadSource, type Unresolved } from "./read.ts";
 import { Session } from "./session.ts";
-import type { Introduction } from "./source.ts";
+import { byKey, type Introduction } from "./source.ts";
 
 export type GetResult = {
   said: string;
@@ -29,8 +29,6 @@ type Known = {
 
 const knownOf = (address: string, via: string[], r: Extract<ReadSource, { ok: true }>): Known =>
   ({ address, via, base: r.base, serves: new Set(r.document.serves.map((s) => s.said)), fetched: 0, cut: false, exhausted: false });
-
-const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * docs/design.md "Bringing a definition home": read the starting source and the sources its introductions name, one step and no
@@ -91,6 +89,6 @@ export async function get(said: string, from: string, session: Session): Promise
   for (const s of sources) if (s.cut) unresolved.push({ address: s.address, via: s.via, reason: "truncated", limit: "definitions" });
 
   if (!files.has(`${said}.json`)) return { ok: false, problem: "the definition asked for was not fetched and verified", unresolved };
-  missing.sort((a, b) => byString(a.said, b.said));
-  return { ok: true, files, result: { said, from, written: [...files.keys()].map((f) => f.slice(0, -5)).sort(byString), missing, unresolved } };
+  missing.sort(byKey("said"));
+  return { ok: true, files, result: { said, from, written: [...files.keys()].map((f) => f.slice(0, -5)).sort(), missing, unresolved } };
 }
