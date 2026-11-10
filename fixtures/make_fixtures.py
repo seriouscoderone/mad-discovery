@@ -1,5 +1,5 @@
 """Make the gym-bp, bpm-core and constructed fixtures. Usage: python -I make_fixtures.py <clean gym-bp store> <fixtures folder>"""
-import base64, json, os, shutil, sys
+import base64, json, os, sys
 from blake3 import blake3
 from bpm_core.said import saidify
 

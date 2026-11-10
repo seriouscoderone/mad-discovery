@@ -5,6 +5,6 @@ Read the workspace instructions in `../CLAUDE.md` first. Design authority is `do
 Two rules an agent must not break here:
 
 - Never parse a definition and write it out again. The build serves bytes as given, or with whitespace between JSON tokens removed (`src/compact.ts`), and checks every output against its SAID (`src/said.ts`).
-- Never put a string on a page except through `escapeHtml` in `src/pages.ts`, and never make a string from a definition or a publication a link target.
+- Never put a string on a page except through `escapeHtml` in `src/pages.ts`, and never make a string from a definition or a publication a link target, except a SAID that this source serves, which `pageLink` alone turns into a link to its own page and which refuses anything that is not a SAID.
 
 Node 24 runs the `.ts` files directly; there is no build step. `npm run check` is the type check, `npm test` the tests. Dependencies are pinned exactly and there are three.

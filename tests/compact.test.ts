@@ -29,6 +29,7 @@ test("compact input is unchanged", () => {
 test("strings are untouched", () => {
   const text = '{ "a" : "x  y \\" z" ,\n "b" : [ 1 , 2.0 ] }';
   assert.equal(Buffer.from(compactJson(Buffer.from(text))).toString(), '{"a":"x  y \\" z","b":[1,2.0]}');
+  assert.equal(Buffer.from(compactJson(Buffer.from('{ "a" : "x\\\\" , "b" : 1 }'))).toString(), '{"a":"x\\\\","b":1}');
 });
 
 test("why parse-then-stringify is not used", () => {
