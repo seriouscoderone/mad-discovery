@@ -106,12 +106,12 @@ export function outDirProblem(outDir: string): string | null {
   return readdirSync(outDir).length > 0 ? `${outDir} is not empty` : null;
 }
 
-/** Writes every planned file, creating folders as needed, after checking the out-folder rule. */
-export function writePlan(plan: BuildPlan, outDir: string): void {
+/** Writes every file, creating folders as needed, after checking the out-folder rule. */
+export function writeFiles(files: Map<string, Uint8Array>, outDir: string): void {
   const problem = outDirProblem(outDir);
   if (problem !== null) throw new Error(problem);
   mkdirSync(outDir, { recursive: true });
-  for (const [path, bytes] of plan.files) {
+  for (const [path, bytes] of files) {
     const full = join(outDir, path);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, bytes);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readInputs } from "../src/inputs.ts";
 import { parseConfig } from "../src/config.ts";
-import { planBuild, writePlan, BuildError } from "../src/build.ts";
+import { planBuild, writeFiles, BuildError } from "../src/build.ts";
 import { checkSaid } from "../src/said.ts";
 import { appearances } from "../src/scan.ts";
 import type { SourceDocument } from "../src/source.ts";
@@ -68,16 +68,16 @@ test("an unserved appearance is reported", () => {
   assert.ok(plan.unserved.some((u) => u.said === contained && u.appearsIn.includes(first)));
 });
 
-test("writePlan needs an absent or empty folder and writes every file", () => {
+test("writeFiles needs an absent or empty folder and writes every file", () => {
   const plan = planBuild(readInputs(gymDir()).inputs, parseConfig(gymConfig));
   const out = join(mkdtempSync(join(tmpdir(), "out-")), "site");
-  writePlan(plan, out);
+  writeFiles(plan.files, out);
   assert.ok(existsSync(join(out, "source.json")));
   const doc = JSON.parse(readFileSync(join(out, "source.json"), "utf8")) as SourceDocument;
   assert.equal(doc.source, "https://gym.example/mad/source.json");
   assert.equal(readdirSync(join(out, "definitions")).length, 26);
   writeFileSync(join(out, "stray.txt"), "x");
-  assert.throws(() => writePlan(plan, out), /not empty/);
+  assert.throws(() => writeFiles(plan.files, out), /not empty/);
 });
 
 test("a publication's by is its second member", () => {

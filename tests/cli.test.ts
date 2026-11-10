@@ -5,7 +5,11 @@ import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { asciiJson } from "../src/cli.ts";
+import { asciiJson, main, type Io } from "../src/cli.ts";
+import { readInputs } from "../src/inputs.ts";
+import { saidOf } from "../src/said.ts";
+import { WALK } from "../src/limits.ts";
+import { Origin } from "./helpers/servers.ts";
 
 const bin = fileURLToPath(new URL("../bin/mad-discovery.ts", import.meta.url));
 const fixtures = fileURLToPath(new URL("../fixtures/", import.meta.url));
@@ -15,6 +19,10 @@ const run = (...args: string[]) => {
 };
 const gymDir = () => { const d = mkdtempSync(join(tmpdir(), "gym-")); cpSync(join(fixtures, "pretty"), d, { recursive: true }); return d; };
 const QVI = "EBfdlu8R27Fbx-ehrqwImnK-8Cm79sqbAQ4MmvEAYqao";
+const capture = () => { const o: string[] = [], e: string[] = []; const io: Io = { out: (s) => { o.push(s); }, err: (s) => { e.push(s); } }; return { io, out: () => o.join(""), err: () => e.join(""), json: () => JSON.parse(o.join("")) as Record<string, unknown> }; };
+const local = { test: true, limits: { ...WALK, requestMs: 2000, runMs: 10_000 } };
+const SELECTION = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY";
+const compactInputs = readInputs(join(fixtures, "compact")).inputs;
 
 test("build writes a source and reports", () => {
   const out = join(mkdtempSync(join(tmpdir(), "out-")), "site");
@@ -68,7 +76,6 @@ test("verify a file", () => {
 
 test("usage errors exit 2", () => {
   assert.equal(run("verify", join(fixtures, "compact", `${QVI}.json`)).code, 2);
-  assert.equal(run("verify", "https://gym.example/mad/definitions/x.json", QVI).code, 2);
   assert.equal(run("nonsense").code, 2);
   assert.equal(run().code, 2);
   const config = join(fixtures, "gym-config.json");
@@ -89,4 +96,102 @@ test("asciiJson escapes everything outside printable ASCII", () => {
   assert.ok(s.includes("\\ud83d\\ude00"));
   assert.ok(s.includes("\\u2028"));
   assert.deepEqual(JSON.parse(s), value);
+});
+
+test("who prints the report and exits 0; a start that cannot be read exits 1; usage errors exit 2", async () => {
+  const [a, b] = [await Origin.start(), await Origin.start()];
+  try {
+    const bAddr = `${b.origin}/mad/source.json`;
+    b.source("mad/", { serve: [SELECTION], publications: [{ target: SELECTION, name: "caf\u00e9", description: "d", tags: [], collection: "c" }] }, compactInputs);
+    // A control character in a publication's name cannot pass the configuration; a hostile source puts one on the wire by hand and the
+    // reader drops and counts it. A definition whose key holding the SAID is an escape sequence reaches the report as a path. The key is
+    // written with the JSON escape, six characters on the wire: a raw control character inside a JSON string is not JSON.
+    const bDoc = JSON.parse(new TextDecoder().decode(b.files.get("mad/source.json")!)) as { serves: unknown[]; publications: unknown[] };
+    bDoc.publications.push({ target: SELECTION, name: "\u001b[31m", description: "d", tags: [], collection: "c" });
+    const shape = (said: string) => `{"d":"${said}","\\u001b[31m":"${SELECTION}"}`;
+    const evil = saidOf(new TextEncoder().encode(shape("#".repeat(44))));
+    bDoc.serves.push({ said: evil, refers: [SELECTION] });
+    b.put("mad/source.json", JSON.stringify(bDoc));
+    b.put(`mad/definitions/${evil}.json`, shape(evil));
+    const { address } = a.source("mad/", { serve: [SELECTION], introductions: [{ source: bAddr }] }, compactInputs);
+    let c = capture();
+    assert.equal(await main(["who", SELECTION, "--from", address], c.io, local), 0);
+    assert.equal((c.json().serves as unknown[]).length, 2);
+    assert.ok(/^[\x20-\x7e\n]*$/.test(c.out()), "ASCII-only");
+    assert.ok(c.out().includes("caf\\u00e9"), "non-ASCII escaped");
+    assert.ok(c.out().includes("\\u001b[31m") && !c.out().includes("\u001b"), "the escape sequence in the path is written as text, never raw");
+    assert.deepEqual(c.json().dropped, [{ source: bAddr, entries: 0, publications: 1 }], "the hostile publication was dropped and counted");
+    assert.deepEqual((c.json().referrers as { said: string; paths: string[] }[]).map((e) => [e.said, e.paths]), [[evil, ["/\u001b[31m"]]]);
+    assert.equal(c.err(), "");
+
+    const dead = await Origin.start(); const deadAddr = `${dead.origin}/mad/source.json`; await dead.close();
+    c = capture();
+    assert.equal(await main(["who", SELECTION, "--from", deadAddr], c.io, local), 1);
+    assert.deepEqual(c.json(), { said: SELECTION, from: deadAddr, problem: "the starting source could not be read: unreachable" });
+
+    for (const args of [["who"], ["who", "nope", "--from", address], ["who", SELECTION], ["who", SELECTION, "--from", "https://1.2.3.4/source.json"], ["who", SELECTION, "--from", address, "--catalog", "https://c.example/catalog.json"]]) {
+      c = capture();
+      assert.equal(await main(args, c.io, local), 2, args.join(" "));
+      assert.equal(c.out(), "");
+      assert.ok(c.err().startsWith("usage:"));
+    }
+  } finally { await a.close(); await b.close(); }
+});
+
+test("get checks --out first, writes verified files only, and reports", async () => {
+  const a = await Origin.start();
+  try {
+    const { address } = a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const full = mkdtempSync(join(tmpdir(), "full-")); writeFileSync(join(full, "x"), "x");
+    let c = capture();
+    assert.equal(await main(["get", SELECTION, "--from", address, "--out", full], c.io, local), 1);
+    assert.deepEqual(c.json(), { problems: [`${full} is not empty`] });
+    assert.equal(a.requests.length, 0, "no request before the out-folder check");
+
+    const out = join(mkdtempSync(join(tmpdir(), "get-")), "home");
+    c = capture();
+    assert.equal(await main(["get", SELECTION, "--from", address, "--out", out], c.io, local), 0);
+    const written = c.json().written as string[];
+    assert.deepEqual(readdirSync(out).sort(), written.map((s) => `${s}.json`).sort());
+    assert.equal(c.json().said, SELECTION);
+
+    a.put(`mad/definitions/${SELECTION}.json`, "{}");
+    const out2 = join(mkdtempSync(join(tmpdir(), "get-")), "home");
+    c = capture();
+    assert.equal(await main(["get", SELECTION, "--from", address, "--out", out2], c.io, local), 1);
+    assert.equal(c.json().problem, "the definition asked for was not fetched and verified");
+    assert.ok(!existsSync(out2));
+    c = capture();
+    assert.equal(await main(["get", SELECTION, "--from", address], c.io, local), 2, "--out is required");
+  } finally { await a.close(); }
+});
+
+test("verify over an address fetches through the routine", async () => {
+  const a = await Origin.start();
+  try {
+    a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const address = `${a.origin}/mad/definitions/${SELECTION}.json`;
+    let c = capture();
+    assert.equal(await main(["verify", address, SELECTION], c.io, local), 0);
+    assert.deepEqual(c.json(), { verified: true, said: SELECTION, address, bytes: compactInputs.get(SELECTION)!.length });
+    c = capture();
+    assert.equal(await main(["verify", address, QVI], c.io, local), 1);
+    assert.equal(c.json().reason, "the SAID is not in the bytes");
+    assert.equal(c.json().address, address);
+    c = capture();
+    assert.equal(await main(["verify", `${a.origin}/mad/definitions/missing.json`, SELECTION], c.io, local), 1);
+    assert.deepEqual(c.json(), { verified: false, expected: SELECTION, address: `${a.origin}/mad/definitions/missing.json`, reason: "not-found" });
+    c = capture();
+    assert.equal(await main(["verify", "https://1.2.3.4/x.json", SELECTION], c.io, local), 1);
+    assert.deepEqual(c.json(), { verified: false, expected: SELECTION, address: "https://1.2.3.4/x.json", reason: "refused-address" });
+    c = capture();
+    assert.equal(await main(["verify", address, SELECTION], c.io), 1, "outside tests the local address fails the rule");
+    assert.equal(c.json().reason, "refused-address");
+  } finally { await a.close(); }
+});
+
+test("the usage names four commands", () => {
+  const r = run();
+  assert.equal(r.code, 2);
+  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "who <SAID> --from <source address>", "get <SAID> --from <source address> --out <folder>"]) assert.ok(r.err.includes(cmd), cmd);
 });
