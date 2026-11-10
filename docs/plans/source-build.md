@@ -396,7 +396,7 @@ Expected: `compact: 37  pretty: 29  refused: 3` (two documents and `index.json`)
 ```markdown
 # Fixtures
 
-Outside vectors for the tests. No file here is produced by the code under test. `make.sh` makes them all; the results are committed as binary (`.gitattributes`: `-text`) and never formatted. A compact fixture has no final newline.
+Outside vectors for the tests. No file here is produced by the code under test. `make.sh` makes them all; the results are committed as binary (`.gitattributes`: `-text`) and never formatted. A compact fixture has no final newline. The makers record where every vector came from and were run once on the maintainer's machine, with bpm-core's and keripy's interpreters and two downloads; they are not expected to run elsewhere, and need not: a frozen document cannot drift from its SAID, so the committed copies stay valid.
 
 - `compact/<SAID>.json`: bytes that verify against the SAID in the file name. 28 are gym-bp's frozen documents, written compactly by bpm-core's own serializer from a clean `rebuild.sh`. One is GLEIF's Qualified vLEI Issuer schema exactly as served from `www.gleif.org`. Two were written by keripy 2.1.0.dev0 (Apache-2.0): an inception event whose SAID is in both `d` and `i`, and a schema with non-ASCII text. Five were saidified by bpm-core and hold values Node's JSON round trip would change. One was constructed so that its SAID is directly followed by `#`.
 - `pretty/<SAID>.json`: the same documents pretty-printed. 28 are gym-bp's store files as stored. One is the vLEI repository's copy of GLEIF's schema (`WebOfTrust/vLEI`, Apache-2.0, `schema/acdc/qualified-vLEI-issuer-vLEI-credential.json`, commit <fill in from make.sh's VLEI_COMMIT>), whose bytes with whitespace removed equal what GLEIF serves.
@@ -670,7 +670,7 @@ git push
 
 **Interfaces:**
 - Consumes: `isSaid` from `src/said.ts`.
-- Produces: `appearances(bytes: Uint8Array, own?: string): string[]` (sorted, unique, boundary rule, own SAID excluded); `PATH_LIMITS = { maxPaths: 16, maxLength: 256, maxDepth: 64 }`; `paths(bytes: Uint8Array, said: string): { parsed: boolean; count: number; paths: string[] }`.
+- Produces: `appearances(bytes: Uint8Array, own?: string): string[]` (sorted, unique, boundary rule, own SAID excluded); `PATH_LIMITS = { maxPaths: 16, maxLength: 256, maxDepth: 64 }`; `depth(text: string): number` (nesting of JSON tokens outside strings); `paths(bytes: Uint8Array, said: string): { parsed: boolean; count: number; paths: string[] }`.
 
 **Acceptance Criteria:**
 - For gym-bp's `EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U`, `appearances` is exactly `["ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1", "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB", "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL"]`, and `paths` for `EMSaOVmC...` is `["/rely_on/0/said"]` with count 1.
@@ -778,7 +778,7 @@ export function appearances(bytes: Uint8Array, own?: string): string[] {
 }
 
 /** Nesting depth of the JSON tokens, counted outside strings; cheap, and safe on any bytes. */
-function depth(text: string): number {
+export function depth(text: string): number {
   let d = 0, max = 0, inString = false, escaped = false;
   for (const c of text) {
     if (inString) { if (escaped) escaped = false; else if (c === "\\") escaped = true; else if (c === '"') inString = false; }
@@ -1556,7 +1556,7 @@ git push
 - Create: `tests/pages.test.ts`
 
 **Interfaces:**
-- Consumes: `PagesInput`, `SourceDocument`, `Publication`, `isSaid`, `appearances`, `paths`, `definitionAddress`.
+- Consumes: `PagesInput`, `SourceDocument`, `Publication`, `isSaid`, `paths`, `depth`, `PATH_LIMITS`, `definitionAddress`, `parseCatalogAddress`.
 - Produces: `escapeHtml(s: string): string`; `renderPages(input: PagesInput): Map<string, string>` writing `pages/index.html`, `pages/style.css`, `pages/<SAID>/index.html`; `sitemapXml(base: string, saids: string[]): string`; `publicationsFor(document, said)`.
 
 **Acceptance Criteria:**
@@ -1564,6 +1564,7 @@ git push
 - A definition page shows: the publications' names, descriptions and `by` (or the source's `by`); the SAID and the command `mad-discovery verify <definition address> <SAID>`; the content as an outline, with SAIDs inside it linked to their pages when this source serves them (never to the page itself); the served definitions that contain it, each with the places of the appearance; the introductions `for` it, by address; the catalogs, each linked to `<catalog base>pages/<SAID>/index.html`.
 - Hostile strings (`</script><script>`, `"><img src=x onerror=...>`, `javascript:alert(1)`, bidirectional controls) appear only as escaped text, never as markup or a link target; the page has no `<script`; every `<` in the page starts one of the writer's own tags; every `href` is a relative page link, the stylesheet, or an address from the document.
 - The page carries the Content-Security-Policy `<meta>` and no inline style attribute; links are relative and name `index.html`.
+- A definition nested deeper than 64 levels, or one that is not JSON, is shown as escaped text instead of an outline, and `build` does not fail on it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1647,6 +1648,17 @@ test("every string on a page is a stranger's", () => {
   assert.ok(page.includes("Introductions"), "a fixed label");
   assert.ok(page.includes(escapeHtml(hostile[0]!)));
 });
+
+test("a definition too deep for an outline is shown as text and still has a page", () => {
+  const content = "[".repeat(100_000) + '"' + "#".repeat(44) + '"' + "]".repeat(100_000);
+  const said = saidOf(new TextEncoder().encode(content));
+  const bytes = new TextEncoder().encode(content.replace("#".repeat(44), said));
+  const document: SourceDocument = { source: "https://x.example/mad/source.json", pages: true, serves: [{ said, refers: [] }], publications: [], introductions: [], catalogs: [] };
+  const files = renderPages({ document, base: "https://x.example/mad/", definitions: new Map([[said, bytes]]) });
+  const page = files.get(`pages/${said}/index.html`)!;
+  assert.ok(page.includes("<pre>"), "shown as text");
+  assert.ok(!page.includes("<ol>"), "not as an outline");
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -1658,7 +1670,7 @@ Expected: FAIL (the stubs render one line per page).
 
 ```ts
 import { isSaid } from "./said.ts";
-import { paths } from "./scan.ts";
+import { paths, depth, PATH_LIMITS } from "./scan.ts";
 import { definitionAddress, parseCatalogAddress } from "./address.ts";
 import type { Publication, SourceDocument } from "./source.ts";
 
@@ -1729,12 +1741,16 @@ function definitionPage(said: string, input: PagesInput, served: Set<string>): s
   const address = definitionAddress(base, said);
   const pubs = publicationsFor(document, said);
   const title = pubs[0]?.name ?? said;
-  let parsed: unknown = null;
-  let content: string;
+  const text = Buffer.from(bytes).toString("utf8");
   const linkable = new Set(served);
   linkable.delete(said);                                  // a page does not link to itself
-  try { parsed = JSON.parse(Buffer.from(bytes).toString("utf8")); content = outline(parsed, linkable); }
-  catch { content = `<pre>${escapeHtml(Buffer.from(bytes).toString("utf8"))}</pre>`; }
+  let content: string;
+  if (depth(text) > PATH_LIMITS.maxDepth) {               // too deep for an outline (and for a recursive walk): shown as text
+    content = `<pre>${escapeHtml(text)}</pre>`;
+  } else {
+    try { content = outline(JSON.parse(text), linkable); }
+    catch { content = `<pre>${escapeHtml(text)}</pre>`; }
+  }
 
   const containers = document.serves.filter((s) => s.refers.includes(said)).map((s) => {
     const where = paths(definitions.get(s.said)!, said);
@@ -2114,3 +2130,30 @@ git push
 - `verify` over an address: arrives with the fetch routine in step 2; `verify` here takes a file and refuses an address with a usage error.
 - The catalog, the finders, deployment, the live check, the hosted catalog: the second epic (bpm-7h1).
 - The optional `by` on a publication and `by`/`oobi` on a source are read, validated and shown here; nothing verifies them, by Ruling 7.
+
+## Stress Test Results: the step 1 plan
+
+Run on 2026-11-09 with the maintainer after he approved the plan. Five branches; he agreed with four and one changed the plan.
+
+### Resolved decisions
+
+- **Scope.** Step 1 stays `build` and `verify <file>` with no network; the walk, `get`, `verify` over an address and the AI Catalog entries follow in their own plans. Agreed.
+- **Fixtures.** The makers run on this machine only, the 28 gym-bp documents become public with the repository as labelled test data, and the vLEI copy is fetched from `main` with its commit recorded. Agreed, with one sentence added to the fixture README.
+- **Hostile input in the operator's own folder.** The dry run found that the outline renderer was recursive with no depth guard, so a one-megabyte definition of nested arrays would have crashed `build`. A definition deeper than the scan's limit of 64 is now shown as escaped text and is still served; refusing it would have added a format rule the design does not have. Modified.
+- **Security surface.** Pages (one escaping sink, no string ever a tag, attribute or link target, CSP meta), disk (fixed paths plus pattern-checked SAIDs, writes only when every check passes, out folder absent or empty) and terminal (ASCII-only JSON). Accepted as planned. Residual risk recorded: a future template edit that bypasses `escapeHtml` is caught only if it touches a field the hostile fixture covers; the rule in `mad-discovery/CLAUDE.md` is the other half of the defence.
+- **Toolchain.** Node 24 type stripping, three pinned dependencies with install scripts off, run from a checkout, `node --test` with no helpers. Accepted; each has a local fallback.
+
+### Changes made
+
+- Task 5 exports `depth`; Task 9 uses it to show a too-deep definition as text, with a 100,000-deep test case and an acceptance line.
+- Task 2's fixture README says the makers record provenance and need not run elsewhere.
+
+### Deferred / parking lot
+
+- An HTML parser in the page tests, if the regex checks ever prove too coarse.
+- A build step and a published package, if anyone outside asks to install the tool.
+
+### Confidence assessment
+
+- Overall: high. Every code block type-checks and every test passes in a scratch copy, including the changes above.
+- Areas of concern: none for step 1 beyond the recorded residual risk.
