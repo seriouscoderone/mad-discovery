@@ -2,6 +2,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createServer as createSecureServer, type Server as SecureServer } from "node:https";
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
+import { planBuild, type BuildPlan } from "../../src/build.ts";
+import { parseConfig } from "../../src/config.ts";
+import type { Inputs } from "../../src/inputs.ts";
 
 const TLS = (file: string) => new URL(`../../fixtures/tls/${file}`, import.meta.url);
 
@@ -43,6 +46,14 @@ export class Origin {
 
   put(path: string, bytes: Uint8Array | string): void {
     this.files.set(path, typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes);
+  }
+
+  /** Builds a source for this origin under prefix (such as "mad/") from a configuration without `source`, and serves its files. */
+  source(prefix: string, config: Record<string, unknown>, inputs: Inputs): { address: string; plan: BuildPlan } {
+    const address = `${this.origin}/${prefix}source.json`;
+    const plan = planBuild(inputs, parseConfig(JSON.stringify({ source: address, ...config }), { test: true }), { test: true });
+    for (const [path, bytes] of plan.files) this.files.set(prefix + path, bytes);
+    return { address, plan };
   }
 
   async close(): Promise<void> {

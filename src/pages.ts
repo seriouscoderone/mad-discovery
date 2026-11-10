@@ -1,12 +1,14 @@
 import { isSaid } from "./said.ts";
 import { paths, parseBounded } from "./scan.ts";
 import { definitionAddress, parseCatalogAddress, parseSourceAddress, parseHttpsAddress } from "./address.ts";
+import type { AddressOptions } from "./address.ts";
 import type { Publication, SourceDocument } from "./source.ts";
 
 export type PagesInput = {
   document: SourceDocument;
   base: string;
   definitions: Map<string, Uint8Array>;
+  options?: AddressOptions;
 };
 
 /**
@@ -72,6 +74,7 @@ function offered(p: Publication, sourceBy: string | undefined): string {
 
 function definitionPage(said: string, input: PagesInput, served: Set<string>): string {
   const { document, base, definitions } = input;
+  const options = input.options ?? {};
   const bytes = definitions.get(said)!;
   const address = definitionAddress(base, said);
   const pubs = publicationsFor(document, said);
@@ -86,9 +89,9 @@ function definitionPage(said: string, input: PagesInput, served: Set<string>): s
     const where = paths(definitions.get(s.said)!, said);
     return `<li>${pageLink(s.said, false)}${where.paths.length > 0 ? ` at ${where.paths.map((p) => `<code>${escapeHtml(p)}</code>`).join(", ")}` : ""}${where.count > where.paths.length ? ` (${where.count} appearances)` : ""}</li>`;
   });
-  const introductions = document.introductions.filter((i) => i.for.includes(said)).map((i) => `<li>${addressLink(parseSourceAddress(i.source)?.address ?? null, i.source)}</li>`);
+  const introductions = document.introductions.filter((i) => i.for.includes(said)).map((i) => `<li>${addressLink(parseSourceAddress(i.source, options)?.address ?? null, i.source)}</li>`);
   const catalogs = document.catalogs.map((c) => {
-    const cat = parseCatalogAddress(c);
+    const cat = parseCatalogAddress(c, options);
     return `<li>${addressLink(cat === null ? null : `${cat.base}pages/${said}/index.html`, c)}</li>`;
   });
 
@@ -107,12 +110,13 @@ ${pubs.map((p) => offered(p, document.by)).join("\n")}
 
 function indexPage(input: PagesInput): string {
   const { document } = input;
+  const options = input.options ?? {};
   const items = document.serves.map((s) => {
     const pubs = publicationsFor(document, s.said);
     const name = pubs[0]?.name;
     return `<li>${pageLink(s.said, true)}${name !== undefined ? ` ${escapeHtml(name)}` : ""}</li>`;
   });
-  const by = document.by !== undefined ? `<p>Run by: <code>${escapeHtml(document.by)}</code>${document.oobi !== undefined ? ` (${addressLink(parseHttpsAddress(document.oobi), document.oobi)})` : ""}</p>` : "";
+  const by = document.by !== undefined ? `<p>Run by: <code>${escapeHtml(document.by)}</code>${document.oobi !== undefined ? ` (${addressLink(parseHttpsAddress(document.oobi, options), document.oobi)})` : ""}</p>` : "";
   const body = `<header><h1>Definitions served here</h1><p>Source document: <code>${escapeHtml(document.source)}</code></p>${by}</header>
 <main><ul>${items.join("")}</ul></main>`;
   return shell("Definitions served here", "style.css", body);

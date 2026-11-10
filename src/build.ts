@@ -6,6 +6,7 @@ import type { ServesEntry, SourceDocument } from "./source.ts";
 import { FILE_BYTES } from "./limits.ts";
 import type { Inputs } from "./inputs.ts";
 import type { Config } from "./config.ts";
+import type { AddressOptions } from "./address.ts";
 import { renderPages, sitemapXml } from "./pages.ts";
 
 export type BuildPlan = {
@@ -27,7 +28,7 @@ export class BuildError extends Error {
 const encoder = new TextEncoder();
 
 /** Everything in memory, every output checked. Nothing is written here. */
-export function planBuild(inputs: Inputs, config: Config): BuildPlan {
+export function planBuild(inputs: Inputs, config: Config, opts: AddressOptions = {}): BuildPlan {
   const problems: string[] = [];
 
   // What a source serves: the named SAIDs, or the publication targets the folder holds; then what appears in them.
@@ -84,7 +85,7 @@ export function planBuild(inputs: Inputs, config: Config): BuildPlan {
     if (!checkSaid(bytes, said)) problems.push(`definitions/${said}.json does not verify`);
     files.set(`definitions/${said}.json`, bytes);
   }
-  for (const [path, text] of renderPages({ document, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])) })) files.set(path, encoder.encode(text));
+  for (const [path, text] of renderPages({ document, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])), options: opts })) files.set(path, encoder.encode(text));
   files.set("sitemap.xml", encoder.encode(sitemapXml(config.source.base, saids)));
   if (problems.length > 0) throw new BuildError(problems);
 
