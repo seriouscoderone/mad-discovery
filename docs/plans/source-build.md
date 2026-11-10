@@ -879,7 +879,7 @@ git push
 
 **Acceptance Criteria:**
 - `https://gym.example/mad/source.json` parses with base `https://gym.example/mad/`; `https://gym.example/source.json` with base `https://gym.example/`.
-- Refused: `http:`, an explicit port, an IP literal in any spelling (`127.1`, `[::1]`), a trailing dot on the host, a user name, a query, a fragment, a path not ending `/source.json`, an address over 512 characters.
+- Refused: `http:`, an explicit port, an IP literal in any spelling (`127.1`, `[::1]`, `0x7f.1`), `localhost` and `*.localhost`, a trailing dot on the host, a user name, a query or a fragment including the empty forms `?` and `#`, a path not ending `/source.json`, an address whose serialization is over 512 characters.
 - With `{ test: true }`, `http://127.0.0.1:8080/mad/source.json` parses, and nothing else is relaxed.
 - `definitionAddress("https://gym.example/mad/", said)` is `https://gym.example/mad/definitions/<said>.json` and throws for a string that is not a SAID.
 
@@ -908,14 +908,24 @@ test("a source address has one form", () => {
     "https://gym.example/mad/source.json#frag",
     "https://gym.example/mad/sources.json",
     "https://gym.example/" + "a".repeat(500) + "/source.json",
+    "https://gym.example/mad/source.json?",
+    "https://gym.example/mad/source.json#",
+    "https://gym.example/mad/source.json?#",
+    "https://localhost/mad/source.json",
+    "https://a.localhost/mad/source.json",
+    "https://0x7f.1/mad/source.json",
+    "https://gym.example/" + "\u00e9".repeat(480) + "/source.json",
     "not an address",
   ]) assert.equal(parseSourceAddress(bad), null, bad);
+  assert.deepEqual(parseSourceAddress("https://gym.example:443/mad/source.json"), { address: "https://gym.example/mad/source.json", base: "https://gym.example/mad/" });
+  assert.equal(parseHttpsAddress("https://gym.example/oobi/EKxy?"), null);
 });
 
 test("the test option relaxes scheme, port and loopback only", () => {
   assert.deepEqual(parseSourceAddress("http://127.0.0.1:8080/mad/source.json", { test: true }), { address: "http://127.0.0.1:8080/mad/source.json", base: "http://127.0.0.1:8080/mad/" });
   assert.equal(parseSourceAddress("http://127.0.0.1:8080/mad/source.json?x", { test: true }), null);
   assert.equal(parseSourceAddress("http://127.0.0.1:8080/mad/other.json", { test: true }), null);
+  assert.deepEqual(parseSourceAddress("http://localhost:8080/mad/source.json", { test: true }), { address: "http://localhost:8080/mad/source.json", base: "http://localhost:8080/mad/" });
 });
 
 test("catalog addresses and plain https addresses", () => {
@@ -928,6 +938,7 @@ test("catalog addresses and plain https addresses", () => {
 test("a definition's address is derived", () => {
   assert.equal(definitionAddress("https://gym.example/mad/", S), `https://gym.example/mad/definitions/${S}.json`);
   assert.throws(() => definitionAddress("https://gym.example/mad/", "../../x"));
+  assert.throws(() => definitionAddress("https://gym.example/mad", S));
 });
 ```
 
@@ -956,20 +967,22 @@ function parseUrl(s: string, opts: AddressOptions): URL | null {
   try { url = new URL(s); } catch { return null; }
   const test = opts.test === true;
   if (url.protocol !== "https:" && !(test && url.protocol === "http:")) return null;
-  if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") return null;
+  if (url.href.length > MAX_LENGTH) return null;
+  // The canonical form: no user name, password, query or fragment, not even an empty one.
+  if (url.href !== url.origin + url.pathname) return null;
   if (url.port !== "" && !test) return null;
   const host = url.hostname;
   if (host === "" || host.endsWith(".")) return null;
   const literal = IPV4.test(host) || host.startsWith("[");
   if (literal && !(test && (host === "127.0.0.1" || host === "[::1]"))) return null;
+  if ((host === "localhost" || host.endsWith(".localhost")) && !test) return null;
   return url;
 }
 
 function parseEnding(s: string, ending: string, opts: AddressOptions): Address | null {
   const url = parseUrl(s, opts);
   if (url === null || !url.pathname.endsWith(ending)) return null;
-  const address = url.href;
-  return { address, base: address.slice(0, address.length - ending.length + 1) };
+  return { address: url.href, base: url.origin + url.pathname.slice(0, url.pathname.length - ending.length + 1) };
 }
 
 export function parseSourceAddress(s: string, opts: AddressOptions = {}): Address | null {
@@ -988,6 +1001,7 @@ export function parseHttpsAddress(s: string, opts: AddressOptions = {}): string 
 
 export function definitionAddress(base: string, said: string): string {
   if (!isSaid(said)) throw new Error(`not a SAID: ${said}`);
+  if (!base.endsWith("/")) throw new Error("a base ends with /");
   return `${base}definitions/${said}.json`;
 }
 ```
@@ -996,6 +1010,8 @@ export function definitionAddress(base: string, said: string): string {
 
 Run: `npm run check && npm test`
 Expected: all pass.
+
+Note (added at execution): the first version checked `search` and `hash`, which the WHATWG parser reports as empty for `source.json?` and `source.json#`, and measured the 512-character limit on the input rather than the serialization. The review of Task 6 found both; the code above is the corrected form: an address must equal `origin + pathname`, the serialization is bounded, `localhost` names are refused as IP literals are, and `definitionAddress` guards its base.
 
 - [ ] **Step 5: Commit**
 
