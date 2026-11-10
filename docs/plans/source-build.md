@@ -1694,7 +1694,7 @@ test("what a page shows", () => {
 });
 
 test("every string on a page is a stranger's", () => {
-  const hostile = ["</script><script>alert(1)</script>", '"><img src=x onerror=alert(1)>', "javascript:alert(1)", "‮right-to-left‬"];
+  const hostile = ["</script><script>alert(1)</script>", '"><img src=x onerror=alert(1)>', "javascript:alert(1)", "\u202eright-to-left\u202c"];
   const content = JSON.stringify({ d: "#".repeat(44), note: hostile, [hostile[1]!]: hostile[2] });
   const said = saidOf(new TextEncoder().encode(content));
   const bytes = new TextEncoder().encode(content.replace("#".repeat(44), said));
