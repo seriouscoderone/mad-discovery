@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { readInputs } from "../src/inputs.ts";
@@ -6,7 +6,7 @@ import { paths } from "../src/scan.ts";
 import { saidOf, FILL } from "../src/said.ts";
 import { Session } from "../src/session.ts";
 import { WALK, type Limits } from "../src/limits.ts";
-import { walk } from "../src/walk.ts";
+import { walk, nextLevel } from "../src/walk.ts";
 import { readSource } from "../src/read.ts";
 import { Origin } from "./helpers/servers.ts";
 
@@ -15,6 +15,8 @@ const SELECTION = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY";   // class-bri
 const origins: Origin[] = [];
 const start = async () => { const o = await Origin.start(); origins.push(o); return o; };
 after(async () => { for (const o of origins) await o.close(); });
+// A failed assertion must not leave a hostile answer in place for the tests after it.
+afterEach(() => { for (const o of origins) o.behave = null; });
 const quick = (more: Partial<Limits> = {}): Limits => ({ ...WALK, requestMs: 2000, runMs: 10_000, ...more });
 const session = (more: Partial<Limits> = {}) => new Session(quick(more), { test: true });
 const publication = (target: string, name: string) => ({ target, name, description: `about ${name}`, tags: ["t"], collection: "c" });
@@ -89,7 +91,10 @@ test("one source: each failure is a named entry and nothing else", async () => {
   // the served definition itself fails the check: no serves entry, one failed-check
   a.put(`s/definitions/${x.said}.json`, '{"d":"' + x.said + '","r":[1]}');
   const r2 = await walk(x.said, address, session());
-  assert.ok(r2.ok && r2.report.serves.length === 0 && r2.report.unresolved.some((u) => u.reason === "failed-check" && u.said === x.said));
+  assert.ok(r2.ok);
+  if (!r2.ok) return;
+  assert.deepEqual(r2.report.serves, []);
+  assert.ok(r2.report.unresolved.some((u) => u.reason === "failed-check" && u.said === x.said));
 
   // 404 and a redirect on definitions
   a.files.delete(`s/definitions/${x.said}.json`);
@@ -237,20 +242,22 @@ test("a cycle of introductions ends, with each source visited once", async () =>
   b.source("mad/", { serve: [SELECTION], introductions: [{ source: cAddr }] }, inputs);
   c.source("mad/", { serve: [SELECTION], introductions: [{ source: aAddr }, { source: bAddr }] }, inputs);
   const r = await walk(SELECTION, aAddr, session());
-  assert.ok(r.ok && r.report.reached === 3 && r.report.unresolved.length === 0);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.report.reached, 3);
+  assert.deepEqual(r.report.unresolved, []);
   for (const o of [a, b, c]) assert.equal(o.requests.filter((p) => p === "mad/source.json").length, 1);
 });
 
 test("within a depth: 'for' first, then one from each introducing source in turn, in address order", async () => {
-  const { nextLevel } = await import("../src/walk.ts");
   const visited = (address: string, intros: { source: string; for: string[] }[]) => ({ address, via: [], fetched: true, read: true, serves: false, publications: [], referrers: [], unresolved: [], dropped: null, catalogs: [], introductions: intros });
   const X = SELECTION;
   const here = [
     visited("https://a.example/source.json", [{ source: "https://a1.example/source.json", for: [] }, { source: "https://a2.example/source.json", for: [X] }, { source: "https://a3.example/source.json", for: [] }]),
-    visited("https://b.example/source.json", [{ source: "https://b1.example/source.json", for: [X] }, { source: "https://b2.example/source.json", for: [] }, { source: "https://a1.example/source.json", for: [] }, { source: "https://seen.example/source.json", for: [] }]),
+    visited("https://b.example/source.json", [{ source: "https://a1.example/source.json", for: [] }, { source: "https://b1.example/source.json", for: [X] }, { source: "https://b2.example/source.json", for: [] }, { source: "https://seen.example/source.json", for: [] }]),
   ];
   const next = nextLevel(X, here, new Set(["https://seen.example/source.json"]));
-  assert.deepEqual(next.map((c) => [c.address.slice(8, 10), c.named]), [["a2", true], ["b1", true], ["a1", false], ["b2", false], ["a3", false]]);
+  assert.deepEqual(next.map((c) => [c.address.slice(8, 10), c.named]), [["a2", true], ["b1", true], ["a1", false], ["a3", false], ["b2", false]], "b's a1 is a's a1, taken once; then a3 and b2 in the second turn");
   assert.deepEqual(next[0]!.via, ["https://a.example/source.json"]);
   assert.deepEqual(next[1]!.via, ["https://b.example/source.json"]);
 });
@@ -321,6 +328,7 @@ test("a dead introduced source, a copy, and an exhausted host are named and the 
   if (!r.ok) return;
   assert.ok(r.report.unresolved.some((u) => u.address === deadAddr && u.reason === "unreachable" && u.via[0] === aAddr));
   assert.ok(r.report.unresolved.some((u) => u.address === copyAddr && u.reason === "invalid"));
+  assert.ok(r.report.serves.some((s) => s.source === bAddr), "b's first source fit its host's budget and was read");
   const onB = r.report.unresolved.filter((u) => Session.hostOf(u.address) === Session.hostOf(bAddr));
   assert.ok(onB.some((u) => u.reason === "timed-out") || onB.some((u) => u.reason === "skipped" && u.limit === "host-bytes"), "b's second source finds the host used up: dropped whole or not started");
 });
@@ -370,4 +378,26 @@ test("readSource refuses an address that is not a source address, and asks nothi
   a.put("x/doc.json", JSON.stringify({ source: address }));   // would read, were it fetched
   assert.deepEqual(await readSource(address, [], session()), { ok: false, unresolved: { address, via: [], reason: "refused-address" } });
   assert.deepEqual(a.requests, []);
+});
+
+test("an introduced source whose document answers 404 is not-found, and the walk goes on", async () => {
+  const [a, b] = [await start(), await start()];
+  const bAddr = `${b.origin}/mad/source.json`;   // b serves nothing: every request is a 404
+  const { address: aAddr } = a.source("mad/", { serve: [SELECTION], introductions: [{ source: bAddr }] }, inputs);
+  const r = await walk(SELECTION, aAddr, session());
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.deepEqual(r.report.unresolved, [{ address: bAddr, via: [aAddr], reason: "not-found" }]);
+  assert.equal(r.report.reached, 1);
+});
+
+test("a source with one bad entry is listed without by or oobi, and its drop is counted", async () => {
+  const a = await start();
+  const address = `${a.origin}/s/source.json`;
+  a.put("s/source.json", JSON.stringify({ source: address, serves: [{ said: "not-a-said" }] }));
+  const r = await walk(SELECTION, address, session());
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.deepEqual(r.report.sources, [{ address, via: [] }]);
+  assert.deepEqual(r.report.dropped, [{ source: address, entries: 1, publications: 0 }]);
 });

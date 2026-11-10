@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,6 +8,8 @@ import { Origin } from "./helpers/servers.ts";
 
 const origin = await Origin.start();
 after(() => origin.close());
+// A failed assertion must not leave a hostile answer in place for the tests after it.
+afterEach(() => { origin.behave = null; });
 const body = new TextEncoder().encode('{"a":1}');
 origin.put("x.json", body);
 const url = (path: string) => `${origin.origin}/${path}`;

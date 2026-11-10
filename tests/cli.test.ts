@@ -129,7 +129,7 @@ test("who prints the report and exits 0; a start that cannot be read exits 1; us
     assert.equal(await main(["who", SELECTION, "--from", deadAddr], c.io, local), 1);
     assert.deepEqual(c.json(), { said: SELECTION, from: deadAddr, problem: "the starting source could not be read: unreachable" });
 
-    for (const args of [["who"], ["who", "nope", "--from", address], ["who", SELECTION], ["who", SELECTION, "--from", "https://1.2.3.4/source.json"], ["who", SELECTION, "--from", address, "--catalog", "https://c.example/catalog.json"]]) {
+    for (const args of [["who"], ["who", "nope", "--from", address], ["who", SELECTION], ["who", SELECTION, "--from", `${a.origin}/mad/other.json`], ["who", SELECTION, "--from", address, "--catalog", "https://c.example/catalog.json"]]) {
       c = capture();
       assert.equal(await main(args, c.io, local), 2, args.join(" "));
       assert.equal(c.out(), "");
@@ -207,5 +207,27 @@ test("an out folder filled during the run is a reported failure, never a crash",
     assert.equal(await main(["get", SELECTION, "--from", address, "--out", out], c.io, local), 1);
     assert.deepEqual(c.json(), { problems: [`${out} is not empty`] });
     assert.deepEqual(readdirSync(out), ["intruder"], "nothing of ours was written");
+  } finally { a.behave = null; await a.close(); }
+});
+
+test("a redirect is reported with its target by verify and by who; a --from that fails the rule is usage for get", async () => {
+  const a = await Origin.start();
+  try {
+    a.behave = (_req, res) => { res.statusCode = 302; res.setHeader("location", "https://moved.test/x.json"); res.end(); return true; };
+    const address = `${a.origin}/mad/definitions/${SELECTION}.json`;
+    let c = capture();
+    assert.equal(await main(["verify", address, SELECTION], c.io, local), 1);
+    assert.deepEqual(c.json(), { verified: false, expected: SELECTION, address, reason: "redirected", target: "https://moved.test/x.json" });
+    const from = `${a.origin}/mad/source.json`;
+    c = capture();
+    assert.equal(await main(["who", SELECTION, "--from", from], c.io, local), 1);
+    assert.deepEqual(c.json(), { said: SELECTION, from, problem: "the starting source could not be read: redirected", target: "https://moved.test/x.json" });
+    const out = join(mkdtempSync(join(tmpdir(), "get-")), "home");
+    c = capture();
+    assert.equal(await main(["get", SELECTION, "--from", `${a.origin}/mad/other.json`, "--out", out], c.io, local), 2);
+    assert.equal(c.out(), "");
+    assert.ok(c.err().includes("--from must be a source address"));
+    assert.ok(!existsSync(out));
+    assert.ok(!a.requests.includes("mad/other.json"), "nothing was asked at the refused address");
   } finally { a.behave = null; await a.close(); }
 });
