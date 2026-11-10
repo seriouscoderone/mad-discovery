@@ -8,7 +8,7 @@ In MAD a protocol is a set of definitions (models, authorizations and responsibi
 
 ## Status
 
-The design is approved (2026-11-09) and the work is two epics: the known-address half (sources, pages, the walk and `get`, epic bpm-5g1) and the stranger half (the catalog and the robots.txt finder, epic bpm-7h1), which starts when the maintainer says. Step 1 of the first epic is built: `build` makes a source from a folder of frozen definitions, and `verify` checks a file against a SAID. Nothing is deployed.
+The design is approved (2026-11-09) and the work is two epics: the known-address half (sources, pages, the walk and `get`, epic bpm-5g1) and the stranger half (the catalog and the robots.txt finder, epic bpm-7h1), which starts when the maintainer says. Steps 1 and 2 of the first epic are built: `build` makes a source from a folder of frozen definitions; `verify` checks a file or an address against a SAID; `who` walks from one source through its introductions and reports who serves, offers or contains a SAID; `get` brings a definition and everything that appears in it home. `who --catalog` waits on the catalog, the second epic. Nothing is deployed.
 
 ## Rulings
 
@@ -42,7 +42,12 @@ npm run check                                   # TypeScript, as a type check on
 npm test                                        # node --test over tests/*.test.ts
 node bin/mad-discovery.ts build <folder> --config <file> --out <folder>
 node bin/mad-discovery.ts verify <file> <SAID>
+node bin/mad-discovery.ts verify <https address> <SAID>
+node bin/mad-discovery.ts who <SAID> --from <source address>
+node bin/mad-discovery.ts get <SAID> --from <source address> --out <folder>
 ```
+
+`who` and `get` reach only `https` sources on the default port at DNS names; the tests stand up local origins through a test-only option that no flag exposes.
 
 The input folder holds one file per definition, named `<SAID>.json`. `fixtures/gym-config.json` is an example configuration; `fixtures/README.md` says where every test vector came from.
 
