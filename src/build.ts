@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { checkSaid } from "./said.ts";
 import { appearances } from "./scan.ts";
@@ -101,9 +101,18 @@ function orderDocument(d: SourceDocument): SourceDocument {
   return out;
 }
 
-/** --out must be absent or empty. Writes every planned file, creating folders as needed. */
+/** --out must be absent or an empty folder: null when it is, otherwise the problem. */
+export function outDirProblem(outDir: string): string | null {
+  let isDirectory: boolean;
+  try { isDirectory = statSync(outDir).isDirectory(); } catch { return null; }
+  if (!isDirectory) return `${outDir} is not a folder`;
+  return readdirSync(outDir).length > 0 ? `${outDir} is not empty` : null;
+}
+
+/** Writes every planned file, creating folders as needed, after checking the out-folder rule. */
 export function writePlan(plan: BuildPlan, outDir: string): void {
-  if (existsSync(outDir) && readdirSync(outDir).length > 0) throw new Error(`${outDir} is not empty`);
+  const problem = outDirProblem(outDir);
+  if (problem !== null) throw new Error(problem);
   mkdirSync(outDir, { recursive: true });
   for (const [path, bytes] of plan.files) {
     const full = join(outDir, path);

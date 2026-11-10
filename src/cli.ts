@@ -1,8 +1,8 @@
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { isSaid, checkSaid, saidOf, replaceAll, FILL } from "./said.ts";
 import { parseConfig, ConfigError } from "./config.ts";
 import { readInputs } from "./inputs.ts";
-import { planBuild, writePlan, BuildError } from "./build.ts";
+import { planBuild, writePlan, outDirProblem, BuildError } from "./build.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
 
@@ -13,12 +13,13 @@ Every command prints JSON on standard output. Exit 0: success. 1: failure. 2: us
 
 /** JSON with every character outside printable ASCII as a \\u escape, so a stranger's string cannot reach a terminal raw. */
 export function asciiJson(value: unknown): string {
-  return JSON.stringify(value, null, 2).replace(/[\u007f-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+  return JSON.stringify(value, null, 2).replace(/[\u007f-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] : undefined;
+  const value = i >= 0 ? args[i + 1] : undefined;
+  return value === undefined || value.startsWith("--") ? undefined : value;
 }
 
 export function main(argv: string[], io: Io): number {
@@ -42,7 +43,8 @@ function build(args: string[], io: Io): number {
     const config = parseConfig(configText);
     const { inputs, refused } = readInputs(folder);
     for (const r of refused) problems.push(`${r.file}: ${r.reason}`);
-    if (existsSync(out) && readdirSync(out).length > 0) problems.push(`${out} is not empty`);
+    const outProblem = outDirProblem(out);
+    if (outProblem !== null) problems.push(outProblem);
     if (problems.length > 0) { io.out(asciiJson({ problems }) + "\n"); return 1; }
     const plan = planBuild(inputs, config);
     writePlan(plan, out);
@@ -50,7 +52,6 @@ function build(args: string[], io: Io): number {
       written: plan.files.size,
       serves: plan.document.serves.map((s) => s.said),
       unserved: plan.unserved,
-      refused,
       robots: plan.robotsLine,
       sitemap: plan.sitemapLine,
     }) + "\n");

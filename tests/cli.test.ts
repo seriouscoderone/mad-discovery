@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, cpSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { asciiJson } from "../src/cli.ts";
 
 const bin = fileURLToPath(new URL("../bin/mad-discovery.ts", import.meta.url));
 const fixtures = fileURLToPath(new URL("../fixtures/", import.meta.url));
@@ -25,6 +26,7 @@ test("build writes a source and reports", () => {
   assert.equal(r.json.sitemap, "Sitemap: https://gym.example/mad/sitemap.xml");
   assert.ok(/^[\x20-\x7e\n]*$/.test(r.out), "ASCII-only output");
   assert.equal(readdirSync(join(out, "definitions")).length, 26);
+  assert.ok(!("refused" in r.json), "a refusal exits 1, so success carries no refused list");
 });
 
 test("build refuses and writes nothing", () => {
@@ -44,6 +46,13 @@ test("build refuses and writes nothing", () => {
   r = run("build", gymDir(), "--config", join(fixtures, "gym-config.json"), "--out", full);
   assert.equal(r.code, 1);
   assert.ok(r.json.problems.some((p: string) => p.includes("not empty")));
+  assert.deepEqual(readdirSync(full), ["x"]);
+  const file = join(mkdtempSync(join(tmpdir(), "file-")), "site");
+  writeFileSync(file, "keep");
+  r = run("build", gymDir(), "--config", join(fixtures, "gym-config.json"), "--out", file);
+  assert.equal(r.code, 1);
+  assert.ok(r.json.problems.some((p: string) => p.includes("is not a folder")));
+  assert.equal(readFileSync(file, "utf8"), "keep");
 });
 
 test("verify a file", () => {
@@ -62,4 +71,22 @@ test("usage errors exit 2", () => {
   assert.equal(run("verify", "https://gym.example/mad/definitions/x.json", QVI).code, 2);
   assert.equal(run("nonsense").code, 2);
   assert.equal(run().code, 2);
+  const config = join(fixtures, "gym-config.json");
+  for (const args of [["build", gymDir(), "--out", "--config", config], ["build", gymDir(), "--config", "--out", "o"]]) {
+    const cwd = mkdtempSync(join(tmpdir(), "cwd-"));
+    const r = spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", cwd });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.ok(!existsSync(join(cwd, "--config")), "no --config folder written");
+    assert.deepEqual(readdirSync(cwd), [], "nothing written");
+  }
+});
+
+test("asciiJson escapes everything outside printable ASCII", () => {
+  const value = { a: "\u00e9\u007f\u{1F600}\u2028\u0001" };
+  const s = asciiJson(value);
+  assert.match(s, /^[\x20-\x7e\n]*$/);
+  assert.ok(s.includes("\\u00e9"));
+  assert.ok(s.includes("\\ud83d\\ude00"));
+  assert.ok(s.includes("\\u2028"));
+  assert.deepEqual(JSON.parse(s), value);
 });
