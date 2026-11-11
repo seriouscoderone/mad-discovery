@@ -26,7 +26,7 @@ The source sits at the host root, so the build also writes `.well-known/ai-catal
 
 `aws s3 sync` sets content types from file extensions (`.json` as `application/json`, which the tool requires). Definitions never need invalidating: a changed definition is a new SAID and a new file.
 
-The robots.txt line for this source, `Mad-Source: https://mad.seriouscoder.one/source.json`, is not placed anywhere yet; the second epic chooses the hosts for the live stranger check and checks them against Common Crawl's index first (Ruling 4).
+The robots.txt line for this source, `Mad-Source: https://mad.seriouscoder.one/source.json`, sits in `https://seriouscoder.one/robots.txt` since 2026-11-10 (see "The robots.txt lines" below).
 
 ## mad.josephleehunsaker.com
 
