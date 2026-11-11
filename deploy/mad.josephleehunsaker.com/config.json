@@ -1,0 +1,20 @@
+{
+  "source": "https://mad.josephleehunsaker.com/source.json",
+  "serve": [
+    "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"
+  ],
+  "publications": [
+    {
+      "target": "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1",
+      "name": "a gym-bp definition, served twice",
+      "description": "Test data from gym-bp: one definition that mad.seriouscoder.one also serves, so that a catalog can find two sources that never introduce each other.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    }
+  ],
+  "introductions": [],
+  "catalogs": []
+}

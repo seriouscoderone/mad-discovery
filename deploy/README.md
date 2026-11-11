@@ -27,3 +27,25 @@ The source sits at the host root, so the build also writes `.well-known/ai-catal
 `aws s3 sync` sets content types from file extensions (`.json` as `application/json`, which the tool requires). Definitions never need invalidating: a changed definition is a new SAID and a new file.
 
 The robots.txt line for this source, `Mad-Source: https://mad.seriouscoder.one/source.json`, is not placed anywhere yet; the second epic chooses the hosts for the live stranger check and checks them against Common Crawl's index first (Ruling 4).
+
+## mad.josephleehunsaker.com
+
+The second deployed source, since 2026-11-10: one gym-bp definition, `ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1`, which `mad.seriouscoder.one` also serves, labelled as test data in its publication. Neither source introduces the other: they are the two strangers the second epic's live check needs (design, "Acceptance", clause 2). Address: `https://mad.josephleehunsaker.com/source.json`.
+
+- Configuration: `mad.josephleehunsaker.com/config.json` (inputs are `fixtures/pretty`).
+- Bucket: `mad-josephleehunsaker-com` (us-east-1, private, read through CloudFront origin access control with `ListBucket` so a missing file answers 404).
+- Certificate: ACM `mad.josephleehunsaker.com` (us-east-1, DNS-validated; the site's own certificate has no wildcard).
+- Distribution: `E8LQQKF16X4MY`, alias `mad.josephleehunsaker.com`, TLS 1.2 and up, no compression, `GET` and `HEAD` only.
+- DNS: `A` and `AAAA` aliases in the `josephleehunsaker.com` zone.
+- Updating it is the same procedure as above with the bucket, configuration and distribution id swapped.
+
+## The robots.txt lines
+
+Placed on 2026-11-10, each in the robots.txt of a site in the maintainer's personal account:
+
+| Site | Bucket and distribution | Line |
+|---|---|---|
+| `https://seriouscoder.one/robots.txt` | `site-seriouscoder-one-117870855864`, `E1CKA05MNLD7XU` | `Mad-Source: https://mad.seriouscoder.one/source.json` |
+| `https://josephleehunsaker.com/robots.txt` | `site-josephleehunsaker-com-117870855864`, `ERB0EISAIW44N` | `Mad-Source: https://mad.josephleehunsaker.com/source.json` |
+
+Each file is `User-agent: *`, `Allow: /`, a blank line and the `Mad-Source:` line; neither site had a robots.txt before. On that day Common Crawl's three newest crawls (CC-MAIN-2026-43, -39, -34) held no capture of either host, checked by range requests into each crawl's `cluster.idx` (Ruling 10). Whether a later crawl picks them up is checked the same way when the second epic's finder runs; the GitHub-topic finder is the route that does not depend on it.

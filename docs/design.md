@@ -360,7 +360,7 @@ Considered and set aside: a DNS TXT record (the open measurement datasets cover 
 
 **Recommendation.** Build the robots finder first, and state its reach. Its input is a named snapshot that never changes, it needs no account, and its analog was found end to end. It reaches parties who control a robots.txt on a website Common Crawl already captures, which is narrower than "anyone". Because the line may name a source on another host, the source itself can live anywhere.
 
-Not covered: a party whose only website is new and unlinked, which is where the first adopters are most likely to be: developers whose site is a new `github.io` page. They are found through introductions, which the maintainer adds to his own source by hand as he hears of them. Nothing more is built for them until real sources show where they live (decision 5).
+Not covered by the robots finder: a party whose only website is new and unlinked, which is where the first adopters are most likely to be: developers whose site is a new `github.io` page. They are found through introductions, which the maintainer adds to his own source by hand as he hears of them. The first real source showed where they live: when the second epic started (2026-11-10), the three newest crawls held no capture of any of the twelve hosts the maintainer controls, so the robots finder could not see his own line. Ruling 10 therefore added the **GitHub-topic finder** beside the robots finder: a public repository carrying the topic `mad-source` whose homepage is the source address, read through GitHub's repository search (measured above: a new repository listed within a minute; it reaches `github.io` sites; one company's index with no snapshot, so its candidate file is named by the date it ran and a build copies it into its output). The robots finder reaches established sites and is repeatable; the GitHub finder reaches new ones and is not; a catalog says which found each source.
 
 Until a finder is proven on real hosts, a catalog covers only what is reachable from the addresses named with `--from`. A catalog built from those alone is a seeded crawl: its list of sources is somebody's hand-kept list, which Ruling 3 does not count as meeting the objective, and its `catalog.json` says so in those words.
 
@@ -572,7 +572,7 @@ The work is two epics under this one design (decision 1): bpm-5g1 and bpm-7h1.
 **Second epic, bpm-7h1: a stranger is found without being told.** Opened now, blocked by the first, started when the maintainer says. Its `done_when`:
 
 1. **Stranger, by fixture.** The test above passes: two sources that never link to each other, a WARC fixture in the shape of Common Crawl's robots.txt archive naming both, `catalog find` over it, and a catalog built from its candidate file lists both for the same SAID.
-2. **Stranger, live.** Two real sources that never link to each other and are named on no command line. Each has its `Mad-Source` line in a robots.txt that Common Crawl already captures with status 200. A catalog built by the documented command from named crawls lists both for the same SAID. Until this passes the finder is not proven, and the objective is not shown to be met for strangers. This clause waits on a third party's schedule: a new line shows up in a crawl 3 days to 7 weeks after it is added, and a crawl can miss either host, so it can take one or two crawls and hold the epic open.
+2. **Stranger, live.** Two real sources that never link to each other and are named on no command line. Each is found by a finder: its `Mad-Source` line in a robots.txt that Common Crawl captures with status 200, or a public GitHub repository carrying the topic `mad-source` whose homepage is the source address (Ruling 10). A catalog built by the documented command from named inputs lists both for the same SAID. Until this passes the finder is not proven, and the objective is not shown to be met for strangers. This clause waits on a third party's schedule: a new line shows up in a crawl 3 days to 7 weeks after it is added, and a crawl can miss either host, so it can take one or two crawls and hold the epic open.
 3. **Catalog pages.** From a catalog's index page a person reaches each source's page for a SAID by links alone.
 
 ## Build order
@@ -587,9 +587,9 @@ When the first epic closes, the repository becomes public (decision 4), and the 
 
 **Second epic**, when the maintainer says.
 
-4. Two robots.txt files that Common Crawl already captures with status 200, on hosts that do not link to each other, each checked against the newest crawl's index first. Two one-definition sources written by hand, both serving the same definition, placed on those hosts or anywhere else, and a `Mad-Source` line naming each. The date recorded. This needs no code and starts the Common Crawl clock, which runs every four to five weeks.
+4. Two robots.txt files on hosts that do not link to each other, each checked against the newest crawls' indexes first. Two one-definition sources, both serving the same definition, placed on those hosts or anywhere else, and a `Mad-Source` line naming each. The date recorded. This needs no code and starts the Common Crawl clock, which runs every four to five weeks. Done 2026-11-10: the check found none of the maintainer's hosts in the three newest crawls, the lines went up regardless on `seriouscoder.one` and `josephleehunsaker.com`, and the sources are `mad.seriouscoder.one` and `mad.josephleehunsaker.com` (Ruling 10).
 5. The catalog build from named sources, and its pages.
-6. The robots finder (`catalog find`) against the fixture, then one full scan of a real crawl, about 165 GB, which shows whether it fits the job it will run in.
+6. The two finders (`catalog find`): the robots finder against the fixture, then one full scan of a real crawl, about 165 GB, which shows whether it fits the job it will run in; and the GitHub-topic finder (Ruling 10) against GitHub's repository search, with a fixture of its answer.
 7. The live check, which is the second epic's clause 2: the two sources from step 4 rebuilt with `build` at the same addresses, and a catalog built with no source address on the command line that lists both for the same SAID. Then the maintainer's catalog goes up, with pages.
 
 Each step is planned and reviewed before it starts, and nothing is deployed without the maintainer's say.
@@ -619,6 +619,10 @@ The maintainer made these on 2026-11-09: first by approving the second draft wit
 7. **The SAID check is format-agnostic, and the envelope is MAD's.** The check presumes only the standard SAID derivation and nothing about the envelope or the language inside it. JSON-only rendering and content types are a noted extension point. (Ruling 8)
 8. **`get` is in the first cut.** It is the network half of reuse; bpm-core's pull and MAD's import are the storage half and can call it. (Ruling 9)
 9. **AI Catalog entries stay; ARD's file does not.** The entries are the first epic's last step, outside its acceptance, without the optional digest. (Ruling 9)
+
+After review, when the second epic started (2026-11-10):
+
+10. **Finders, after the crawl check.** The three newest Common Crawl crawls hold no capture of any host the maintainer controls, so the live check could not run on his hosts as written. Both routes: the `Mad-Source` lines went up anyway on `seriouscoder.one` and `josephleehunsaker.com`, with a second source at `mad.josephleehunsaker.com`, so the robots route completes if Common Crawl ever captures those hosts; and Ruling 9 is amended: a GitHub-topic finder joins the robots finder in step 6, because the first real adopter needs it. The live clause is met by either finder. (Ruling 10)
 
 ## Defaults chosen here
 
@@ -666,7 +670,7 @@ Run on 2026-11-09 with the maintainer, after he approved the second draft. Nine 
 ### Deferred / parking lot
 
 - A keripy-resolvable `/oobi/<SAID>` shape for models that are KERI schemas, for sources at a host root.
-- A GitHub search finder, if real adopters live where the robots.txt finder cannot see.
+- A GitHub search finder, if real adopters live where the robots.txt finder cannot see. Resolved by Ruling 10 (2026-11-10): they do, starting with the maintainer; the GitHub-topic finder joins step 6.
 - What a build does when it has more candidates than its limit (it stops and writes nothing); theoretical until there are adopters.
 - Non-JSON definition serializations: the page renderer and the accepted content types.
 
