@@ -8,6 +8,7 @@ import type { Inputs } from "./inputs.ts";
 import type { Config } from "./config.ts";
 import type { AddressOptions } from "./address.ts";
 import { renderPages, sitemapXml } from "./pages.ts";
+import { aiCatalogJson, isHostRoot, WELL_KNOWN_PATH } from "./aicatalog.ts";
 
 export type BuildPlan = {
   files: Map<string, Uint8Array>;
@@ -15,6 +16,8 @@ export type BuildPlan = {
   unserved: { said: string; appearsIn: string[] }[];
   robotsLine: string;
   sitemapLine: string;
+  /** The AI Catalog file's address when written (the base is the root of its host), otherwise null. */
+  aiCatalog: string | null;
 };
 
 export class BuildError extends Error {
@@ -87,6 +90,8 @@ export function planBuild(inputs: Inputs, config: Config, opts: AddressOptions =
   }
   for (const [path, text] of renderPages({ document, base: config.source.base, definitions: new Map(saids.map((s) => [s, inputs.get(s)!] as [string, Uint8Array])), options: opts })) files.set(path, encoder.encode(text));
   files.set("sitemap.xml", encoder.encode(sitemapXml(config.source.base, saids)));
+  const root = isHostRoot(config.source.base);
+  if (root) files.set(WELL_KNOWN_PATH, encoder.encode(aiCatalogJson(document, config.source.base)));
   if (problems.length > 0) throw new BuildError(problems);
 
   return {
@@ -95,6 +100,7 @@ export function planBuild(inputs: Inputs, config: Config, opts: AddressOptions =
     unserved: [...unserved.keys()].sort().map((said) => ({ said, appearsIn: [...unserved.get(said)!].sort() })).filter((u) => !introducedFor.has(u.said)),
     robotsLine: `Mad-Source: ${config.source.address}`,
     sitemapLine: `Sitemap: ${config.source.base}sitemap.xml`,
+    aiCatalog: root ? config.source.base + WELL_KNOWN_PATH : null,
   };
 }
 

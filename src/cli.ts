@@ -81,6 +81,7 @@ function build(args: string[], io: Io): number {
       unserved: plan.unserved,
       robots: plan.robotsLine,
       sitemap: plan.sitemapLine,
+      aiCatalog: plan.aiCatalog,
     }) + "\n");
     return 0;
   } catch (e) {

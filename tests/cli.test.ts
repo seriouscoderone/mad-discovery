@@ -231,3 +231,16 @@ test("a redirect is reported with its target by verify and by who; a --from that
     assert.ok(!a.requests.includes("mad/other.json"), "nothing was asked at the refused address");
   } finally { a.behave = null; await a.close(); }
 });
+
+test("build at a host root writes and reports the AI Catalog file; under a path it reports null", () => {
+  const out = join(mkdtempSync(join(tmpdir(), "out-")), "site");
+  const config = join(mkdtempSync(join(tmpdir(), "cfg-")), "root.json");
+  writeFileSync(config, readFileSync(join(fixtures, "gym-config.json"), "utf8").replace("https://gym.example/mad/source.json", "https://gym.example/source.json"));
+  const r = run("build", gymDir(), "--config", config, "--out", out);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json.aiCatalog, "https://gym.example/.well-known/ai-catalog.json");
+  assert.equal(r.json.written, 26 * 2 + 5, "26 definitions, 26 pages, source.json, index, style, sitemap, the catalog");
+  assert.ok(existsSync(join(out, ".well-known", "ai-catalog.json")));
+  const under = run("build", gymDir(), "--config", join(fixtures, "gym-config.json"), "--out", join(mkdtempSync(join(tmpdir(), "out-")), "site"));
+  assert.equal(under.json.aiCatalog, null);
+});
