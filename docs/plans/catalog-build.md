@@ -53,7 +53,7 @@ mad-discovery/
   tests/robots.test.ts, crawl.test.ts, catalog.test.ts, catalogpages.test.ts; walk.test.ts and cli.test.ts extended; fetch.test.ts and session.test.ts extended for the text mode
 ```
 
-Dependencies between tasks: 1 -> 2 -> 4; 1 -> 3; 3 -> 5 -> 6 -> 7; 5 -> 8; 6, 7, 8 -> 9 -> 10.
+Dependencies between tasks: 1 -> 2 -> 4; 1 -> 3 -> 7; 3 and 4 -> 5 -> 6; 5, 6 and 7 -> 8 -> 9.
 
 ---
 
@@ -1210,7 +1210,7 @@ const X = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY";
 const Y = "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4";
 const A = "https://a.example/mad/source.json";
 const B = "https://b.example/source.json";
-const hostile = { target: X, name: "</script><script>alert(1)</script>", description: "javascript:alert(1) ‮ reversed", tags: ["<b>"], collection: "\"><img src=x onerror=alert(1)>" };
+const hostile = { target: X, name: "</script><script>alert(1)</script>", description: "javascript:alert(1) \u202e reversed", tags: ["<b>"], collection: "\"><img src=x onerror=alert(1)>" };
 const rows: Row[] = [
   { said: X, serves: [{ source: A }, { source: B }], publications: [{ source: B, publication: hostile }], referrers: [{ source: A, said: Y, paths: ["/rrs/0"], appearances: 1 }], counts: [{ source: A, publications: 0, referrers: 1 }, { source: B, publications: 3, referrers: 0 }], omittedSources: 1 },
   { said: Y, serves: [{ source: A }], publications: [], referrers: [], counts: [{ source: A, publications: 0, referrers: 0 }] },
