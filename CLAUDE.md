@@ -1,6 +1,6 @@
 # mad-discovery
 
-Read the workspace instructions in `../CLAUDE.md` first. Design authority is `docs/design.md` (approved 2026-11-09) and the rulings in `README.md`. The plans are `docs/plans/source-build.md` (step 1) and `docs/plans/walk-and-get.md` (step 2, current).
+Read the workspace instructions in `../CLAUDE.md` first. Design authority is `docs/design.md` (approved 2026-11-09) and the rulings in `README.md`. The plans are `docs/plans/source-build.md` (step 1), `docs/plans/walk-and-get.md` (step 2) and `docs/plans/ai-catalog.md` (step 3, current).
 
 Three rules an agent must not break here:
 

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use beads-superpowers:subagent-driven-development (recommended) or beads-superpowers:executing-plans to implement this plan task-by-task. Each Task becomes a bead (`bd create -t task --parent <epic-id>`). Steps within tasks use checkbox (`- [ ]`) syntax for human readability.
 
+**Executed 2026-11-10.** Task 1 by a subagent, reviewed and approved as written (bead bpm-2wu.1, commit `9afcb82`; the only addition a doc comment on `BuildPlan.aiCatalog`); Task 2 by the controller (bpm-2wu.2). The deployed source serves the file: `https://mad.seriouscoder.one/.well-known/ai-catalog.json`, 200 as `application/ai-catalog+json`, 26 entries, 3 with `displayName`, byte-identical to the build's. 133 tests.
+
 **Goal:** When a source sits at the root of a host, `build` also writes `/.well-known/ai-catalog.json`, a Level 1 AI Catalog with one entry per served definition, checked by a test against the specification at commit `6e26a18`; then the deployed root-hosted source `mad.seriouscoder.one` is rebuilt and serves it.
 
 **Architecture:** One new module, `src/aicatalog.ts`, builds the catalog object from the source document the build already has (`serves` for the entries, `publications` for the optional text) and the derived definition addresses; `build.ts` writes it when the base is a host root; the command reports the file's address. The test carries a checker written from the specification's CDDL and proves it against the specification's own example, committed as a fixture, before applying it to the build's output. No network, no new dependency.

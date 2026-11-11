@@ -18,8 +18,11 @@ To update it, from a checkout with Node 24 and `AWS_PROFILE=personal`:
 node bin/mad-discovery.ts build fixtures/pretty --config deploy/mad.seriouscoder.one/config.json --out /tmp/mad-site
 aws s3 sync /tmp/mad-site s3://mad-seriouscoder-one --delete --cache-control "public, max-age=300"
 aws s3 cp s3://mad-seriouscoder-one/definitions s3://mad-seriouscoder-one/definitions --recursive --metadata-directive REPLACE --content-type application/json --cache-control "public, max-age=31536000, immutable"
-aws cloudfront create-invalidation --distribution-id E3PDWZWR269C2D --paths "/source.json" "/pages/*" "/sitemap.xml"
+aws s3 cp /tmp/mad-site/.well-known/ai-catalog.json s3://mad-seriouscoder-one/.well-known/ai-catalog.json --content-type application/ai-catalog+json --cache-control "public, max-age=300"
+aws cloudfront create-invalidation --distribution-id E3PDWZWR269C2D --paths "/source.json" "/pages/*" "/sitemap.xml" "/.well-known/*"
 ```
+
+The source sits at the host root, so the build also writes `.well-known/ai-catalog.json`; it is uploaded with the media type the specification names, `application/ai-catalog+json`, which `aws s3 sync` would not guess.
 
 `aws s3 sync` sets content types from file extensions (`.json` as `application/json`, which the tool requires). Definitions never need invalidating: a changed definition is a new SAID and a new file.
 

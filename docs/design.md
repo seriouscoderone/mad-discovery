@@ -417,7 +417,7 @@ A page is a rendering and is evidence of nothing. The check runs on the bytes at
 
 ## AI Catalog entries
 
-When a source sits at the root of a host, the build also writes `/.well-known/ai-catalog.json` in the Linux Foundation AI Catalog format, with one entry per served definition: `identifier` (the SAID), `type` (`application/json`) and `url` (the definition's address). A display name or description, when present, comes only from this source's own publication of that definition. Nothing in the file is copied from a definition's content. This is the one dot-folder a source may have: GitHub Pages skips it unless told otherwise (a branch deploy needs an empty `.nojekyll`, an Actions deploy `include-hidden-files: true`).
+When a source sits at the root of a host, the build also writes `/.well-known/ai-catalog.json` in the Linux Foundation AI Catalog format, with one entry per served definition: `identifier` (the SAID), `type` (`application/json`) and `url` (the definition's address). A display name, description or tags, when present, come only from this source's own publication of that definition (the first, when it has several). Nothing in the file is copied from a definition's content. This is the one dot-folder a source may have: GitHub Pages skips it unless told otherwise (a branch deploy needs an empty `.nojekyll`, an Actions deploy `include-hidden-files: true`).
 
 The format's optional `digest` member, a sha-256 of the served bytes, is left out. Nothing here reads it, no surveyed entry carried one, and the SAID stays the only digest of a definition this project writes. The hex Blake3 digest in a catalog's `sources.json` is of a source document as read; it identifies nothing and is there only so that two builds can be compared.
 
