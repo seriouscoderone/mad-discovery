@@ -205,7 +205,7 @@ A publication is an offering: one exact definition put forward for others to fin
 - **It is the record MAD writes when it writes a source.** When MAD's publish step exists (bpm-nq3.5), it writes this record into a source folder, so there is one format and not two.
 - **How it differs from MAD's `Publication` type** (`mad/src/views.ts`). `tags` is a list; MAD's form holds one comma-separated string. `collection` is one string, and ` / ` inside it means nothing to this project. `target` is a SAID; in MAD today it is a prototype reference, until bpm-nq3.3. `by` is an optional AID; MAD's `endorser` is the local principal's id, and MAD's publish step maps one to the other when it has an AID to give. `targetId` is left out because it is local to one MAD instance, `kind` because a reader takes it from the definition, and `components` because it belongs to assemblies.
 - **Assemblies.** MAD's Publish screen has a fourth target, the assembly. It is not in this cut: a publication's target is a SAID, and whether an assembly gets one is bpm-nq3.6. If it does, an assembly is served and looked up like any definition.
-- **Limits.** A name or a collection is at most 200 characters, a description 2,000, and there are at most 32 tags of 64 characters each. No field holds a control character. A publication that breaks a limit is dropped and counted. The numbers are proposals.
+- **Limits.** A name or a collection is at most 200 characters, a description 2,000, and there are at most 32 tags of 64 characters each. No field holds a control character, and every field is well-formed Unicode: a lone surrogate fails the rule, because a browser wallet's store cannot hold such text and would refuse the whole file it sits in (Ruling 12, 2026-11-12). The same two rules hold for a source document's `by` and `oobi`, for a JSON Pointer path the scan reports from a definition's keys, and for a candidate file's `place` values. A publication that breaks a limit is dropped and counted. The numbers are proposals.
 
 ## Introductions
 
@@ -627,6 +627,8 @@ After review, when the second epic started (2026-11-10):
 On 2026-11-12, for the maintainer's KERI wallet, which runs in a browser:
 
 11. **Browser wallets may read a source.** A source that wants them to sends `Access-Control-Allow-Origin: *` on `source.json` and on `definitions/*`. The header is optional; a source without it is still a source for the tools here. `verify` over an address reports it and does not fail without it. (Ruling 11, bpm-7h1.13)
+
+12. **A stranger's string is well-formed Unicode.** A publication field, `by`, `oobi`, a JSON Pointer path reported from a definition's keys or a candidate file's `place` value that holds a lone surrogate fails its rule as a control character does: dropped and counted, in the source rules, in the scan's paths and so in a catalog's rows. A browser wallet's store cannot hold such text and refuses the whole file, so one hostile string would otherwise make a row unreadable to every wallet. A format rule, not an exclusion list. Raised by the Fortoid session (fortoid-5wa). (Ruling 12, bpm-7h1.14)
 
 ## Defaults chosen here
 

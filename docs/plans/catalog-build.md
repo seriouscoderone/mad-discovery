@@ -10,14 +10,15 @@
 
 **Scope:** Design build order step 5: "The catalog build from named sources, and its pages", plus `who --catalog`, which reads the row file this step creates. Candidate files from finders are read and copied into the output here; writing them is step 6 (`catalog find`, the robots finder and the GitHub-topic finder, Ruling 10), which gets its own plan; the command `catalog find` is refused with a usage note until then. The second epic's clause 1 (the stranger by fixture, which needs the finder) and clause 2 (live) are steps 6 and 7; clause 3 (catalog pages: from the index a person reaches each source's page for a SAID by links alone) is met here by tests. Nothing is deployed and no AWS is touched; hosting the maintainer's catalog is step 7.
 
-**Dry run.** A first draft of this plan was executed in a scratch copy and read against the design before it was presented (2026-11-10): five text fixes brought it to 159 passing tests with nothing beyond loopback, and the design review's 23 findings (one a stalling robots.txt matcher) are folded in below. The code blocks here are the corrected ones. The plan was then rebased (2026-11-12) on Ruling 11's changes to `src/fetch.ts`, `src/session.ts` and `src/cli.ts` (`verify` asks as a browser would; 141 tests at `dd3be3d`): `Session.fetch` takes one options object carrying both that work's `asBrowser` and this plan's `type`.
+**Dry run.** A first draft of this plan was executed in a scratch copy and read against the design before it was presented (2026-11-10): five text fixes brought it to 159 passing tests with nothing beyond loopback, and the design review's 23 findings (one a stalling robots.txt matcher) are folded in below. The code blocks here are the corrected ones. The plan was then rebased (2026-11-12) on Ruling 11's changes to `src/fetch.ts`, `src/session.ts` and `src/cli.ts` (`verify` asks as a browser would; 141 tests at `dd3be3d`): `Session.fetch` takes one options object carrying both that work's `asBrowser` and this plan's `type`. The rebased draft was dry-run and re-reviewed again the same day: 169 tests passed in the scratch copy with nothing beyond loopback, and the twelve findings (three test fixtures that could not pass as written, a candidate-file name that could leave `candidates/`, two copies to one path, a copy that was not the bytes read, percent-decoding in the robots matcher, a worktree's `commondir`, and nits) are folded in. Task 0 carries Ruling 12, decided that day.
 
 ## Global Constraints
 
 From `docs/design.md`; every task's requirements include these, and the step 1 and 2 plans' constraints still hold (one fetch routine, the address rule, the `test` option for test code only, ASCII-only sources, no new dependency, strangers' strings only as JSON values or through `escapeHtml`).
 
 - **Limits, catalog build column:** one request 10 s; one file 1 MB; 500 definitions from one source in SAID order; 10 introductions from one source (the first ten listed, in address order); introduction depth 3; 1,000 sources per run; 120 s and 100 MB per host; 8 hosts in flight; no clock for the whole run. A count limit cuts in a fixed order and the source is `truncated` with the limits that cut it, in table order (`definitions`, `introductions`); a source whose host uses up its time or bytes is dropped whole (`timed-out`) and the host's sources not yet started are `skipped` with the limit's name. Row limits: from one source a row takes one publication of the SAID (the first in its document; the rest are counted) and at most 50 definitions that contain the SAID, lowest SAID first, with the full count stated; a row is at most 1 MB, keeping contributing sources in the build's order up to that size and stating how many it left out. All in `src/limits.ts`; `catalog.json` writes every limit the build ran with, the path and publication limits included.
-- **Order and repeatability:** sources are taken breadth-first in the order the walk uses (introducing sources in address order, each source's introductions in address order, one from each in turn; a catalog build asks about no SAID, so nothing is `named`). Candidates named with `--from` and read from candidate files are de-duplicated and visited in sorted order at depth 0; if more remain than the limit on sources per run the build stops, writes nothing and reports the count. What a build includes is decided by counts and fixed order, never by which answer arrived first. Two builds of the same inputs over sources that answer alike produce byte-identical files. No file holds the catalog's own address; no file holds a time. Every catalog file is written ASCII-only, with the same `\u` escaping as the walk's report.
+- **Order and repeatability:** sources are taken breadth-first in the order the walk uses (introducing sources in address order, each source's introductions in address order, one from each in turn; a catalog build asks about no SAID, so nothing is `named`). Candidates named with `--from` and read from candidate files are de-duplicated and visited in sorted order at depth 0; if more remain than the limit on sources per run the build stops, writes nothing and reports the count. What a build includes is decided by counts and fixed order, never by which answer arrived first. Two builds of the same inputs over sources that answer alike produce byte-identical files. No file holds the catalog's own address; no file holds a time. Every file the build composes is written ASCII-only, with the same `\u` escaping as the walk's report; a copied candidate file is the one exception: it is the bytes read, so another party can compare it.
+- **Strings (Ruling 12):** a stranger's string that is not well-formed Unicode (a lone surrogate) fails its rule as a control character does: a publication with one is dropped and counted by the reader; a JSON Pointer path whose key holds one is not reported (the occurrence is still counted); a candidate file's `place` value with one is dropped. A browser wallet's store cannot hold such text and refuses the whole file it sits in.
 - **Rows:** a SAID has a row only when a visited source served bytes for it that passed the check; a SAID that definitions contain but no source serves has no row and appears nowhere. Every statement is attributed to the source address it was fetched from; nothing in one source's files can create or change a row attributed to another. Publications are recorded as claimed, only in rows that exist, and carry the source document's `by` when the publication has none (stated, never verified). A count of sources is a count of addresses and is reported as such. No row is carried over; a source that cannot be reached adds nothing and is listed with its outcome. An empty build (no source `ok` or `truncated`) writes nothing and exits non-zero. Posting is open: no build leaves a source out.
 - **Files** (beside `catalog.json` under fixed names): `catalog.json` (how it was built: the tool's commit read from the checkout, the starting sources, the finder, snapshot and copied path of each candidate file, every limit; a seeded crawl says so in the design's words), `index.json` (every SAID with a row, sorted; for each the number of source addresses that served it, counted before any row cut, and the names its publications give it, each beside the source that gave it), `said/<SAID>.json` (one row: `said`, `serves`, `publications`, `referrers`, each entry as in the walk's report without `via`, plus the counts; no `from`, `unresolved`, `catalogs` or `reached`), `sources.json` (every address tried: every way it was found, its outcome with the limits that cut it, the counts of dropped entries, a hex Blake3 digest of the source document bytes read, each fetched definition that did not end `verified` with its outcome, the number of definitions never tried, and each `refers` entry the scan did not find), `candidates/<finder>/<snapshot>.json` (each candidate file the build was given, byte for byte, so another party can compare), `pages/index.html`, `pages/<SAID>/index.html`, `pages/style.css`. Outcomes are names only: no error text, no redirect target, no timings enter a catalog's files.
 - **robots.txt:** a catalog build obeys the robots.txt group for `mad-discovery`, or else the group for `*`, fetched once per host per build. A 4xx answer means no restrictions. A 5xx answer, no answer or a redirect means the host is skipped with the outcome `disallowed`; an address the rule or the connection check refuses keeps its own outcome, `refused-address`. The walk does not consult robots.txt. The robots.txt fetch goes through the one fetch routine, which gains a text mode (`text/plain`); everything else about it (address rule, resolve-once, size, deadline) is unchanged, and it sends no `Origin` header: Ruling 11's `asBrowser` is `verify`'s alone, and a catalog build's requests carry exactly the headers a walk's do. The matcher is iterative and bounded: a rule longer than 512 characters is ignored, at most 1,000 rules are kept per group, and no rule can make a match take more than a few milliseconds.
@@ -29,21 +30,24 @@ From `docs/design.md`; every task's requirements include these, and the step 1 a
 
 The design fixes the files' members in prose; this plan fixes their JSON. Each is cheap to change before execution. The design review checked each against the design: where the design decides, the plan now follows it; the rest the design leaves open.
 
-1. **Candidate file** (written by step 6, read here): `{ "finder": "<name>", "snapshot": "<crawl name or date>", "candidates": [ { "address": "<source address>", "place": { ... } } ] }`; `place` is free-form per finder (the robots finder: `{ "file": "<archive file>", "offset": <n> }`; the GitHub finder: `{ "repository": "<owner/name>" }`), its keys limited to `^[A-Za-z][A-Za-z0-9_]{0,31}$` and its values to strings and numbers. `finder` and `snapshot` match `^[A-Za-z0-9._-]{1,64}$`, because the build copies the file to `candidates/<finder>/<snapshot>.json`.
+1. **Candidate file** (written by step 6, read here): `{ "finder": "<name>", "snapshot": "<crawl name or date>", "candidates": [ { "address": "<source address>", "place": { ... } } ] }`; `place` is free-form per finder (the robots finder: `{ "file": "<archive file>", "offset": <n> }`; the GitHub finder: `{ "repository": "<owner/name>" }`), its keys limited to `^[A-Za-z][A-Za-z0-9_]{0,31}$` and its values to well-formed strings and numbers (Ruling 12). `finder` and `snapshot` match `^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$` (no leading dot: `.` and `..` would leave the folder), because the build copies the file to `candidates/<finder>/<snapshot>.json`; two files that would land on one path, compared case-insensitively, refuse the build.
 2. **`catalog.json`:** `{ "tool": { "commit": "<40 hex>" | null }, "from": [addresses], "candidates": [ { "finder", "snapshot", "count", "path" } ], "droppedCandidates": <n not source addresses>, "limits": { ...the catalog Limits, "paths": PATH_LIMITS, "publication": PUBLICATION, "row": ROW }, "seeded": <true when no candidate file was given>, "note": "<the design's sentence, when seeded>" }`. The design decides that every table limit is written and that a seeded build says so; the shape is the plan's.
 3. **`index.json`:** `{ "saids": [ { "said", "sources": <n addresses that served it, before any row cut>, "names": [ { "name", "source" } ] } ] }` sorted by SAID, names in source-address order. The index is the list of what exists; a row's `omittedSources` explains any gap.
 4. **`said/<SAID>.json`:** `{ "said", "serves": [ { "source" } ], "publications": [ { "source", "by"?, "publication" } ], "referrers": [ { "source", "said", "paths", "appearances" } ], "counts": [ { "source", "publications": <total>, "referrers": <total> } ], "omittedSources"?: <n> }`; sources in the build's order; a `counts` entry for every source that serves, publishes or contains; within a source referrers by SAID; `by` is the source document's stated AID when the publication has none, so the catalog page can say who offers as the source page does.
 5. **`sources.json`:** `{ "sources": [ { "address", "found": [ { "by": "from" } | { "by": "introduction", "from": "<address>" } | { "by": "finder", "finder", "snapshot", "place" } ], "outcome", "limits": [names], "dropped": { "entries", "publications" }, "digest": "<hex>" | null, "definitions": [ { "said", "outcome" } ], "untried": <n>, "refers": [ { "in": "<definition>", "said", "outcome": "not-contained" } ] } ] }` sorted by address. `found` lists every way (the design: "every introducing address"), `from` entries first, finder entries next, introductions last by introducing address. `limits` names every count limit that cut the source, in table order, and the budget that stopped a skipped one. `definitions` lists fetched definitions that did not end `verified`; `untried` counts the ones beyond the definitions cut (the design's "truncated with the limit" reading; a 5,500-definition source would otherwise add 5,000 lines). The digest is kept for a source dropped whole after its document was read, since the digest is what lets two builders compare that source.
-6. **The robots.txt check:** what the design fixes: the group for `mad-discovery`, else `*`; a 4xx answer is no restrictions; 5xx, no answer or a redirect is `disallowed`. What the plan adds: the check applies to the source document's path and to each definition's path; matching follows RFC 9309 (longest match wins, `Allow` wins a tie, `*` and `$` understood, the group chosen by product-token match); a `text/plain` answer is required and a 200 with another type, an encoding or over 1 MB counts as unreadable (`disallowed`), the strict side; an address the fetch routine refuses keeps `refused-address`.
+6. **The robots.txt check:** what the design fixes: the group for `mad-discovery`, else `*`; a 4xx answer is no restrictions; 5xx, no answer or a redirect is `disallowed`. What the plan adds: the check applies to the source document's path and to each definition's path; matching follows RFC 9309 (longest match wins, `Allow` wins a tie, `*` and `$` understood, percent-encoded unreserved octets decoded before comparison, the group chosen by product-token match); a `text/plain` answer is required and a 200 with another type, an encoding or over 1 MB counts as unreadable (`disallowed`), the strict side; an address the fetch routine refuses keeps `refused-address`.
 7. **The tool's commit** is read from `.git/HEAD` of the checkout `bin/` runs from (through the ref it names, loose or packed; a worktree's `.git` file naming a `gitdir:` is followed); `null` when there is none. No child process.
-8. **`who --catalog`'s sample** uses `crypto.randomInt`; the row's addresses join the depth-1 round-robin as one more introducing list keyed by the catalog's address; the row is read only after the start was.
-9. **ASCII files.** Every catalog file is written with the walk report's `\u` escaping (`asciiJson`, moved to `src/json.ts`), so a row shown on a terminal cannot redraw it and two builders' files are byte-identical regardless of locale.
+8. **`who --catalog`'s sample** uses `crypto.randomInt`; the row's addresses join the depth-1 round-robin as one more introducing list keyed by the catalog's address; the row is read only after the start was. `taken` counts the slots the row filled: a row address the starting source also introduces by name, whose list sorts ahead of the catalog's in the round-robin, enters on that introduction with `via: [from]` and is not counted, as the start itself is not when the row lists it.
+9. **ASCII files.** Every file the build composes is written with the walk report's `\u` escaping (`asciiJson`, moved to `src/json.ts`), so a row shown on a terminal cannot redraw it and two builders' files are byte-identical regardless of locale. A copied candidate file is the bytes read, not re-encoded.
 10. **One options object for `Session.fetch`.** Ruling 11 gave `Session.fetch` a second positional argument (`asBrowser`); this plan needs a second mode (`type`). Both become members of one options object, `fetch(address, { type?, asBrowser? })`, and `verify`'s call changes to match. Nothing about `verify`'s behaviour changes.
+11. **Well-formed strings (Ruling 12, bpm-7h1.14).** Raised by the Fortoid session: a browser wallet's store cannot hold a lone surrogate, so it refuses any file holding one, and one hostile publication name would make a row and `index.json` unreadable to every wallet. The maintainer adopted the rule on 2026-11-12: `String.prototype.isWellFormed()` joins the control-character check wherever a stranger's string is accepted. Task 0 puts it in the source rules and the scan; Task 5 applies it to `place` values. A format rule, not an exclusion list.
 
 ## File structure
 
 ```
 mad-discovery/
+  src/source.ts         validatePublication: a field is well-formed Unicode (Ruling 12)
+  src/scan.ts           paths(): a pointer whose key is not well-formed is not reported
   src/limits.ts         + CATALOG: Limits (the build's column), ROW: { referrersPerSource: 50, rowBytes: 1_000_000 }, RowLimits
   src/json.ts           asciiJson (from cli.ts), used by the command and the catalog files
   src/fetch.ts          FetchOptions.type?: "json" | "text"; text accepts text/plain; a non-ok ending carries status
@@ -60,7 +64,69 @@ mad-discovery/
   tests/robots.test.ts, crawl.test.ts, visit.test.ts, catalog.test.ts, catalogpages.test.ts; walk.test.ts and cli.test.ts extended; fetch.test.ts and session.test.ts extended
 ```
 
-Dependencies between tasks: 1 -> 2 -> 4; 1 -> 3 -> 7; 3 and 4 -> 5 -> 6; 5, 6 and 7 -> 8 -> 9.
+Dependencies between tasks: 0 -> 1 -> 2 -> 4; 1 -> 3 -> 7; 3 and 4 -> 5 -> 6; 5, 6 and 7 -> 8 -> 9.
+
+---
+
+### Task 0: A stranger's string is well-formed Unicode (Ruling 12)
+
+**Files:**
+- Modify: `src/source.ts`, `src/scan.ts`, `tests/config.test.ts`, the test file that covers `paths` (`tests/scan.test.ts`; if the scan's tests live in another file, append there)
+
+**Interfaces:**
+- Produces: no new names. `validatePublication` refuses a `name`, `description`, `collection` or tag that is not well-formed Unicode with a problem naming "well-formed Unicode"; `paths()` leaves out a pointer whose key is not well-formed and still counts the occurrence.
+
+**Acceptance Criteria:**
+- A publication field holding a lone surrogate fails `validatePublication` with a problem that names well-formed Unicode; the configuration reader reports it as a problem (`build` refuses), and a source on the wire has that publication dropped and counted (Task 5's second test asserts the wire case).
+- `paths()` on a definition whose key holds a lone surrogate reports `count` 1 and `paths` `[]` for the SAID under that key; other pointers of the same definition are unaffected.
+- Every existing test passes; the control-character rule is unchanged.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/config.test.ts`, beside its control-character case (it has a `problems(...)` helper and a `pub` fixture; use the same):
+
+```ts
+test("a publication field that is not well-formed Unicode is refused, like a control character (Ruling 12)", () => {
+  const lone = String.fromCharCode(0xd83d);   // a high surrogate with no low half: not text a browser wallet's store can hold
+  assert.match(problems({ ...base, publications: [{ ...pub, name: "a" + lone }] }).join(), /well-formed Unicode/);
+  assert.match(problems({ ...base, publications: [{ ...pub, tags: ["ok", lone] }] }).join(), /well-formed/);
+  assert.deepEqual(problems({ ...base, publications: [{ ...pub, name: "a\u00e9 \ud83d\ude00" }] }), [], "a paired surrogate and a non-ASCII letter are well-formed");
+});
+```
+
+Append to the scan's test file (its imports already have `paths` and a way to make a SAID-shaped string; `SAID_A`/`SAID_B` below stand for two SAID-shaped constants that file defines, or write two literal 44-character SAIDs matching `^E[A-P][A-Za-z0-9_-]{42}$`):
+
+```ts
+test("a pointer whose key is not well-formed Unicode is not reported; the occurrence is still counted (Ruling 12)", () => {
+  const lone = String.fromCharCode(0xd83d);
+  const bytes = new TextEncoder().encode(JSON.stringify({ d: SAID_A, [lone]: SAID_B, fine: SAID_B }));   // JSON.stringify writes the lone surrogate as \ud83d
+  const r = paths(bytes, SAID_B);
+  assert.equal(r.parsed, true);
+  assert.equal(r.count, 2);
+  assert.deepEqual(r.paths, ["/fine"], "the ill-formed key's pointer is left out");
+});
+```
+
+- [ ] **Step 2: Run the tests to see them fail**
+
+Run: `node --test tests/config.test.ts tests/scan.test.ts`
+Expected: FAIL: no problem is reported for the lone surrogate; `paths` reports two pointers.
+
+- [ ] **Step 3: The rule**
+
+In `src/source.ts`, under the `CONTROL` comment add `// A lone surrogate is not text a browser wallet's store can hold (Ruling 12): refused like a control character.` In `validatePublication`'s `text` helper, after the control-character line: `if (!v.isWellFormed()) return { problem: \`${k} is not well-formed Unicode\` };`. In the tags loop, the condition becomes `typeof t !== "string" || t.length > PUBLICATION.tag || hasControlCharacters(t) || !t.isWellFormed()` and the message `tags[${i}] is not a string of at most ${PUBLICATION.tag} characters of well-formed Unicode without control characters`.
+
+In `src/scan.ts` `paths()`, the push condition becomes `if (occs[k]!.at >= i && pointer.length <= PATH_LIMITS.maxLength && pointer.isWellFormed() && out.length < PATH_LIMITS.maxPaths) out.push(pointer);` with the comment `// A pointer is text a catalog writes: one whose key is not well-formed Unicode is left out (Ruling 12).`
+
+- [ ] **Step 4: Run the checks and the whole suite, then commit**
+
+Run: `npm run check && npm test`
+Expected: all pass.
+
+```bash
+git add src/source.ts src/scan.ts tests/config.test.ts tests/scan.test.ts
+git commit -m "feat: a stranger's string is well-formed Unicode, in publications and reported paths (<bead id>)"
+```
 
 ---
 
@@ -265,6 +331,8 @@ test("longest match wins, Allow wins a tie, * and $ are understood, text after #
   assert.equal(allows(rules, "mad-discovery", "/x/y.json.bak"), true);
   assert.equal(allows(rules, "mad-discovery", "/tmpfiles/a"), false);
   assert.equal(allows(parseRobots("User-agent: *\nAllow: /a\nDisallow: /a\n"), "mad-discovery", "/a/b"), true, "a tie goes to Allow");
+  assert.equal(allows(parseRobots("User-agent: *\nDisallow: /mad/\n"), "mad-discovery", "/%6Dad/source.json"), false, "a percent-encoded unreserved octet is the character (RFC 9309 2.2.2)");
+  assert.equal(allows(parseRobots("User-agent: *\nDisallow: /%7Ejoe\n"), "mad-discovery", "/~joe/x"), false, "in the rule as well");
 });
 
 test("a hostile rule cannot stall the matcher, and oversize rules and groups are bounded", () => {
@@ -274,10 +342,11 @@ test("a hostile rule cannot stall the matcher, and oversize rules and groups are
   assert.equal(allows(rules, "mad-discovery", path), true);
   assert.ok(performance.now() - t0 < 50, `took ${performance.now() - t0} ms`);
   assert.equal(allows(parseRobots("User-agent: *\nDisallow: /" + "x".repeat(600) + "\n"), "mad-discovery", "/" + "x".repeat(600)), true, "a rule over 512 characters is ignored");
-  const many = parseRobots("User-agent: *\n" + Array.from({ length: 1500 }, (_, i) => `Disallow: /p${i}\n`).join(""));
+  // Zero-padded: a rule is a prefix match, so /p1 would otherwise disallow /p1499.
+  const many = parseRobots("User-agent: *\n" + Array.from({ length: 1500 }, (_, i) => `Disallow: /p${String(i).padStart(4, "0")}\n`).join(""));
   assert.equal(many.groups[0]!.rules.length, 1000);
   assert.equal(allows(many, "mad-discovery", "/p1499"), true, "beyond the thousandth rule, nothing is read");
-  assert.equal(allows(many, "mad-discovery", "/p999"), false);
+  assert.equal(allows(many, "mad-discovery", "/p0999"), false);
 });
 
 test("one fetch per host; 4xx allows everything; 5xx, a redirect, no answer and a wrong type disallow the host; a refused address keeps its outcome", async () => {
@@ -378,14 +447,20 @@ function matches(pattern: string, path: string): boolean {
   return j === p.length;                                 // the path is consumed: the pattern must be too
 }
 
+/** RFC 9309 2.2.2: a percent-encoded unreserved octet is the character; any other escape is compared upper-cased. */
+function normalizePath(s: string): string {
+  return s.replace(/%([0-9A-Fa-f]{2})/g, (m, hex: string) => { const c = String.fromCharCode(parseInt(hex, 16)); return /[A-Za-z0-9\-._~]/.test(c) ? c : m.toUpperCase(); });
+}
+
 /** Whether the rules allow this path for this product: the product's group, else the * group, else yes; longest match wins, Allow a tie. */
 export function allows(rules: RobotsRules, product: string, path: string): boolean {
   const token = productToken(product);
   const group = rules.groups.find((g) => g.agents.some((a) => productToken(a) === token)) ?? rules.groups.find((g) => g.agents.includes("*"));
   if (group === undefined) return true;
+  const target = normalizePath(path);
   let best: { allow: boolean; length: number } | null = null;
   for (const rule of group.rules) {
-    if (!matches(rule.path, path)) continue;
+    if (!matches(normalizePath(rule.path), target)) continue;
     const length = rule.path.length;
     if (best === null || length > best.length || (length === best.length && rule.allow && !best.allow)) best = { allow: rule.allow, length };
   }
@@ -920,10 +995,10 @@ git commit -m "feat: the catalog's visit of a source: robots rule, every definit
 
 **Interfaces:**
 - Consumes: `levels`, `Candidate`, `visitAll`, `SourceVisit`, `Robots`, `Session`, `Unresolved`, `parseSourceAddress`, `RowLimits`, `ROW`, `CATALOG`, `PATH_LIMITS`, `PUBLICATION`, `byKey`, `isRecord`, `isSaid`, `asciiJson`.
-- Produces: `type CandidateFile = { finder: string; snapshot: string; candidates: { address: string; place: Record<string, string | number> }[] }`; `readCandidateFile(text: string): CandidateFile | null`; `type Found = { by: "from" } | { by: "introduction"; from: string } | { by: "finder"; finder: string; snapshot: string; place: Record<string, string | number> }`; `type Row = { said: string; serves: { source: string }[]; publications: { source: string; by?: string; publication: Publication }[]; referrers: { source: string; said: string; paths: string[]; appearances: number }[]; counts: { source: string; publications: number; referrers: number }[]; omittedSources?: number }`; `type BuildInput = { from: string[]; candidates: { file: CandidateFile; text: string }[]; session: Session; robots: Robots; row: RowLimits; toolCommit: string | null }`; `type BuildOutcome = { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } } | { ok: false; problem: string }`; `buildCatalog(input: BuildInput): Promise<BuildOutcome>` (writes no pages; Task 6 adds them); `toolCommit(checkout: URL): string | null`.
+- Produces: `type CandidateFile = { finder: string; snapshot: string; candidates: { address: string; place: Record<string, string | number> }[] }`; `readCandidateFile(text: string): CandidateFile | null`; `type Found = { by: "from" } | { by: "introduction"; from: string } | { by: "finder"; finder: string; snapshot: string; place: Record<string, string | number> }`; `type Row = { said: string; serves: { source: string }[]; publications: { source: string; by?: string; publication: Publication }[]; referrers: { source: string; said: string; paths: string[]; appearances: number }[]; counts: { source: string; publications: number; referrers: number }[]; omittedSources?: number }`; `type BuildInput = { from: string[]; candidates: { file: CandidateFile; bytes: Uint8Array }[]; session: Session; robots: Robots; row: RowLimits; toolCommit: string | null }`; `type BuildOutcome = { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } } | { ok: false; problem: string }`; `buildCatalog(input: BuildInput): Promise<BuildOutcome>` (writes no pages; Task 6 adds them); `toolCommit(checkout: URL): string | null`.
 
 **Acceptance Criteria:**
-- Candidates: `--from` addresses and candidate files' addresses are de-duplicated (canonical form) and visited in sorted order at depth 0; an address failing the rule is dropped and counted (`droppedCandidates`); more candidates than `sourcesPerRun` gives `{ ok: false, problem }` before any fetch; a candidate file whose `finder` or `snapshot` fails the name pattern is refused by `readCandidateFile`; each candidate file given is copied into the output at `candidates/<finder>/<snapshot>.json` byte for byte and `catalog.json` names the path.
+- Candidates: `--from` addresses and candidate files' addresses are de-duplicated (canonical form) and visited in sorted order at depth 0; an address failing the rule is dropped and counted (`droppedCandidates`); more candidates than `sourcesPerRun` gives `{ ok: false, problem }` before any fetch; a candidate file whose `finder` or `snapshot` fails the name pattern is refused by `readCandidateFile`; each candidate file given is copied into the output at `candidates/<finder>/<snapshot>.json` byte for byte and `catalog.json` names the path; two candidate files that would land on one path (compared case-insensitively) refuse the build before any fetch; a `place` value that is not well-formed Unicode is dropped (Ruling 12).
 - Rows exist exactly for SAIDs some read source served verified; a SAID that is only contained has no row, appears in no `referrers`, in no `index.json` and in no `refers` entry; a definition containing a letter-case variant of a SAID (one that still matches the pattern) leaves that SAID's row unchanged and creates no file for the variant.
 - Attribution: every entry names the source it was fetched from; a source's publications of a SAID it does not serve enter only a row another source created, attributed to the publishing source; a publication without `by` carries the source document's `by` when it states one.
 - One publication per source per row (the first), with the full count in `counts`; at most `referrersPerSource` referrers per source, lowest SAID first, with the full count; a `counts` entry for every source that serves, publishes or contains; a row that would exceed `rowBytes` keeps contributing sources in the build's order up to that size, never removes the first, sets `omittedSources` to the number of contributing sources removed, and a build in which one contributor alone exceeds the limit fails with a problem naming the SAID and the source.
@@ -957,7 +1032,7 @@ const robotsOk: NonNullable<Origin["behave"]> = (req, res) => { if (req.url === 
 const start = async () => { const o = await Origin.start(); o.behave = robotsOk; origins.push(o); return o; };
 after(async () => { for (const o of origins) await o.close(); });
 const session = (more: Partial<Limits> = {}) => new Session({ ...CATALOG, requestMs: 2000, ...more }, { test: true });
-const build = (from: string[], more: Partial<Limits> = {}, row: RowLimits = ROW, candidates: CandidateFile[] = []) => { const s = session(more); return buildCatalog({ from, candidates: candidates.map((file) => ({ file, text: JSON.stringify(file) })), session: s, robots: new Robots(s), row, toolCommit: "0123456789abcdef0123456789abcdef01234567" }); };
+const build = (from: string[], more: Partial<Limits> = {}, row: RowLimits = ROW, candidates: CandidateFile[] = []) => { const s = session(more); return buildCatalog({ from, candidates: candidates.map((file) => ({ file, bytes: new TextEncoder().encode(JSON.stringify(file)) })), session: s, robots: new Robots(s), row, toolCommit: "0123456789abcdef0123456789abcdef01234567" }); };
 const text = (files: Map<string, Uint8Array>, path: string) => new TextDecoder().decode(files.get(path)!);
 const json = (files: Map<string, Uint8Array>, path: string) => JSON.parse(text(files, path)) as Record<string, unknown>;
 const row = (files: Map<string, Uint8Array>, said: string) => json(files, `said/${said}.json`) as unknown as Row;
@@ -1006,7 +1081,11 @@ test("a row exists only for verified served bytes; attribution follows the fetch
   const [honest, hostile] = [await start(), await start()];
   const x = definition([]);
   const y = definition([x.said]);
-  const variant = x.said.slice(0, 10) + (x.said[10] === x.said[10]!.toUpperCase() ? x.said[10]!.toLowerCase() : x.said[10]!.toUpperCase()) + x.said.slice(11);   // still matches the pattern
+  // A letter past the two pattern-fixed characters, case-flipped: still matches the pattern. (x.said is deterministic and its eleventh character is a digit, whose case cannot flip.)
+  const at = [...x.said].findIndex((ch, i) => i >= 2 && /[A-Za-z]/.test(ch));
+  const flipped = x.said[at] === x.said[at]!.toUpperCase() ? x.said[at]!.toLowerCase() : x.said[at]!.toUpperCase();
+  const variant = x.said.slice(0, at) + flipped + x.said.slice(at + 1);
+  assert.notEqual(variant, x.said);
   const z = definition([variant], ',"n":"z"');
   const ghost = "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";   // SAID-shaped, served by nobody
   const g = definition([ghost], ',"n":"g"');
@@ -1014,8 +1093,9 @@ test("a row exists only for verified served bytes; attribution follows the fetch
   honest.put("s/source.json", JSON.stringify({ source: hAddr, serves: [{ said: x.said }, { said: y.said, refers: [x.said] }, { said: z.said, refers: [variant] }, { said: g.said, refers: [ghost] }] }));
   for (const d of [x, y, z, g]) honest.put(`s/definitions/${d.said}.json`, d.bytes);
   const kAddr = `${hostile.origin}/s/source.json`;
-  // The hostile source claims x and y, serves wrong bytes for x and nothing for y, and publishes y and the ghost.
-  hostile.put("s/source.json", JSON.stringify({ source: kAddr, serves: [{ said: x.said }, { said: y.said }], publications: [{ target: y.said, name: "mine", description: "d", tags: [], collection: "c" }, { target: ghost, name: "ghost", description: "d", tags: [], collection: "c" }] }));
+  // The hostile source claims x and y, serves wrong bytes for x and nothing for y, publishes y and the ghost, and publishes y again under a name that is not well-formed Unicode (Ruling 12): JSON.stringify writes the lone surrogate as the six-character escape, which is what a hostile source puts on the wire.
+  const lone = String.fromCharCode(0xd83d);
+  hostile.put("s/source.json", JSON.stringify({ source: kAddr, serves: [{ said: x.said }, { said: y.said }], publications: [{ target: y.said, name: "mine", description: "d", tags: [], collection: "c" }, { target: ghost, name: "ghost", description: "d", tags: [], collection: "c" }, { target: y.said, name: "bad " + lone, description: "d", tags: [], collection: "c" }] }));
   hostile.put(`s/definitions/${x.said}.json`, '{"d":"' + x.said + '","r":[1]}');
   const r = await build([hAddr, kAddr]);
   assert.ok(r.ok); if (!r.ok) return;
@@ -1025,11 +1105,13 @@ test("a row exists only for verified served bytes; attribution follows the fetch
   assert.deepEqual(rx.referrers.map((e) => [e.source, e.said]), [[hAddr, y.said]], "z contains the variant, not x");
   const ry = row(r.files, y.said);
   assert.deepEqual(ry.serves, [{ source: hAddr }]);
-  assert.deepEqual(ry.publications.map((p) => p.source), [kAddr], "a publication from a source that does not serve, in a row that exists");
+  assert.deepEqual(ry.publications.map((p) => [p.source, p.publication.name]), [[kAddr, "mine"]], "a publication from a source that does not serve, in a row that exists; the ill-formed one was dropped by the reader");
   const everything = [...r.files.keys()].map((p) => text(r.files, p)).join("\n");
   assert.ok(!everything.includes(ghost), "the ghost appears nowhere: no row, no referrer, no index entry, no refers entry");
-  const sources = json(r.files, "sources.json") as { sources: { address: string; definitions: { said: string; outcome: string }[]; refers: { in: string; said: string }[] }[] };
+  assert.ok(!everything.includes("ud83d") && !everything.includes("bad "), "the ill-formed name reaches no file");
+  const sources = json(r.files, "sources.json") as { sources: { address: string; dropped: { entries: number; publications: number }; definitions: { said: string; outcome: string }[]; refers: { in: string; said: string }[] }[] };
   const k = sources.sources.find((s) => s.address === kAddr)!;
+  assert.deepEqual(k.dropped, { entries: 0, publications: 1 }, "the drop is counted");
   assert.deepEqual(k.definitions.sort((p, q) => (p.said < q.said ? -1 : 1)), [{ said: x.said, outcome: "failed-check" }, { said: y.said, outcome: "not-found" }].sort((p, q) => (p.said < q.said ? -1 : 1)));
   const h = sources.sources.find((s) => s.address === hAddr)!;
   assert.deepEqual(h.refers, [], "z's refers names the variant and z's bytes contain it: contained; g's refers names the ghost and contains it: contained");
@@ -1051,23 +1133,27 @@ test("one publication and at most referrersPerSource referrers from one source, 
   assert.deepEqual(rx.counts, [{ source: address, publications: 3000, referrers: 5 }]);
   assert.equal(rx.omittedSources, undefined);
 
+  // One leaf of the fixture (it contains no SAID, and served alone nothing contains it) from b and c, so one row exists; d reads but contributes nothing to it.
+  // The limit falls on every row, so the SELECTION closure cannot serve here: 11 of its 12 rows exceed 400 bytes with one source (up to 924).
+  // Measured with this row shape: the leaf row is 325 bytes with one source, 348 with omittedSources, 512 with two; d's row is 321.
+  const LEAF = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1";
   const [b, c, d] = [await start(), await start(), await start()];
-  const bAddr = b.source("mad/", { serve: [SELECTION] }, inputs).address;
-  const cAddr = c.source("mad/", { serve: [SELECTION] }, inputs).address;
+  const bAddr = b.source("mad/", { serve: [LEAF] }, inputs).address;
+  const cAddr = c.source("mad/", { serve: [LEAF] }, inputs).address;
   const other = definition([], ',"n":"other"');
   const dAddr = `${d.origin}/s/source.json`;
-  d.put("s/source.json", JSON.stringify({ source: dAddr, serves: [{ said: other.said }] }));   // a read source that contributes nothing to the SELECTION row
+  d.put("s/source.json", JSON.stringify({ source: dAddr, serves: [{ said: other.said }] }));   // a read source that contributes nothing to the LEAF row
   d.put(`s/definitions/${other.said}.json`, other.bytes);
   const small = await build([bAddr, cAddr, dAddr], {}, { referrersPerSource: 50, rowBytes: 400 });
   assert.ok(small.ok); if (!small.ok) return;
-  const sel = row(small.files, SELECTION);
-  assert.ok(small.files.get(`said/${SELECTION}.json`)!.length <= 400, "within the row limit");
-  assert.equal(sel.omittedSources, 1, "one contributing source removed; the non-contributing one is not counted");
-  assert.deepEqual(sel.serves, [{ source: [bAddr, cAddr].sort()[0] }], "contributors kept in the build's order");
+  const leaf = row(small.files, LEAF);
+  assert.ok(small.files.get(`said/${LEAF}.json`)!.length <= 400, "within the row limit");
+  assert.equal(leaf.omittedSources, 1, "one contributing source removed; the non-contributing one is not counted");
+  assert.deepEqual(leaf.serves, [{ source: [bAddr, cAddr].sort()[0] }], "contributors kept in the build's order");
   const index = json(small.files, "index.json") as { saids: { said: string; sources: number }[] };
-  assert.equal(index.saids.find((s) => s.said === SELECTION)!.sources, 2, "the index counts what was verified, before the cut");
+  assert.equal(index.saids.find((s) => s.said === LEAF)!.sources, 2, "the index counts what was verified, before the cut");
   const tiny = await build([bAddr], {}, { referrersPerSource: 50, rowBytes: 100 });
-  assert.ok(!tiny.ok && tiny.problem.includes(SELECTION) && tiny.problem.includes(bAddr), "one contributor alone over the limit fails the build");
+  assert.ok(!tiny.ok && tiny.problem.includes(LEAF) && tiny.problem.includes(bAddr), "one contributor alone over the limit fails the build");
 });
 
 test("candidate files: read, copied into the output, de-duplicated with --from, sorted; bad addresses dropped and counted; too many stops the build", async () => {
@@ -1079,7 +1165,9 @@ test("candidate files: read, copied into the output, de-duplicated with --from, 
   assert.equal(readCandidateFile("{}"), null);
   assert.equal(readCandidateFile(JSON.stringify({ finder: "robots", snapshot: "x", candidates: [{ address: 5 }] })), null);
   assert.equal(readCandidateFile(JSON.stringify({ finder: "../etc", snapshot: "x", candidates: [] })), null, "finder and snapshot become a path");
-  assert.deepEqual(readCandidateFile(JSON.stringify({ finder: "github", snapshot: "2026-11-10", candidates: [{ address: aAddr, place: { repository: "a/b", __proto__: "x", "bad key": 1, nested: {} } }] }))!.candidates[0]!.place, { repository: "a/b" });
+  assert.equal(readCandidateFile(JSON.stringify({ finder: "..", snapshot: "index", candidates: [] })), null, "a dot-led name is refused: candidates/../index.json would replace the index");
+  // The text form, so that __proto__ is an own key of the parsed object (in an object literal it would set the prototype instead); the lone surrogate is written as its six-character escape.
+  assert.deepEqual(readCandidateFile(`{"finder":"github","snapshot":"2026-11-10","candidates":[{"address":${JSON.stringify(aAddr)},"place":{"repository":"a/b","__proto__":"x","bad key":1,"nested":{},"lone":"\\ud83d"}}]}`)!.candidates[0]!.place, { repository: "a/b" }, "__proto__, keys outside the pattern, objects and ill-formed strings are dropped");
   const r = await build([aAddr], {}, ROW, [file]);
   assert.ok(r.ok); if (!r.ok) return;
   const meta = json(r.files, "catalog.json") as Record<string, unknown>;
@@ -1090,6 +1178,11 @@ test("candidate files: read, copied into the output, de-duplicated with --from, 
   const sources = json(r.files, "sources.json") as { sources: { address: string; found: unknown[] }[] };
   assert.deepEqual(sources.sources.map((s) => s.address), [aAddr, bAddr].sort());
   assert.deepEqual(sources.sources.find((s) => s.address === aAddr)!.found, [{ by: "from" }, { by: "finder", finder: "robots", snapshot: "CC-MAIN-2026-43", place: { file: "y.warc.gz", offset: 7 } }]);
+  assert.deepEqual(await build([aAddr], {}, ROW, [file, { ...file, finder: "Robots" }]), { ok: false, problem: "two candidate files would both be written as candidates/Robots/CC-MAIN-2026-43.json" }, "one path per file, on a case-insensitive file system too");
+  const twice = await build([aAddr, aAddr], {}, ROW, [{ ...file, candidates: [file.candidates[1]!, file.candidates[1]!] }]);
+  assert.ok(twice.ok); if (!twice.ok) return;
+  assert.deepEqual((json(twice.files, "sources.json") as { sources: { address: string; found: unknown[] }[] }).sources.find((s) => s.address === aAddr)!.found, [{ by: "from" }, { by: "finder", finder: "robots", snapshot: "CC-MAIN-2026-43", place: { file: "y.warc.gz", offset: 7 } }], "the same way twice is recorded once");
+  assert.deepEqual((json(twice.files, "catalog.json") as { from: string[] }).from, [aAddr]);
   const tooMany = await build([aAddr, bAddr], { sourcesPerRun: 1 });
   assert.deepEqual(tooMany, { ok: false, problem: "2 candidates, more than the limit of 1 sources per run" });
   assert.equal(a.requests.filter((p) => p === "mad/source.json").length, 1, "the refused build fetched nothing");
@@ -1105,7 +1198,7 @@ test("every introducing address is recorded; a build where nothing was read writ
   const sources = json(r.files, "sources.json") as { sources: { address: string; found: unknown[] }[] };
   assert.deepEqual(sources.sources.find((s) => s.address === bAddr)!.found, [{ by: "introduction", from: aAddr }]);
   assert.deepEqual(sources.sources.find((s) => s.address === cAddr)!.found, [{ by: "introduction", from: aAddr }, { by: "introduction", from: bAddr }].sort((p, q) => (p.from < q.from ? -1 : 1)), "both introducers, although c was taken once");
-  assert.deepEqual(row(r.files, SELECTION).serves.map((s) => s.source), [aAddr, bAddr, cAddr]);
+  assert.deepEqual(row(r.files, SELECTION).serves.map((s) => s.source), [aAddr, ...[bAddr, cAddr].sort()], "depth 0, then depth 1 in address order");
   const dead = await Origin.start(); const deadAddr = `${dead.origin}/mad/source.json`; await dead.close();
   assert.deepEqual(await build([deadAddr]), { ok: false, problem: "no source could be read" });
 });
@@ -1123,7 +1216,14 @@ test("the tool's commit comes from the checkout, or is null", () => {
   assert.equal(toolCommit(pathToFileURL(dir + "/")), "fedcbafedcbafedcbafedcbafedcbafedcbafedc");
   const tree = mkdtempSync(join(tmpdir(), "worktree-"));
   writeFileSync(join(tree, ".git"), `gitdir: ${join(dir, ".git")}\n`);
-  assert.equal(toolCommit(pathToFileURL(tree + "/")), "fedcbafedcbafedcbafedcbafedcbafedcbafedc", "a worktree's .git file names the real folder");
+  assert.equal(toolCommit(pathToFileURL(tree + "/")), "fedcbafedcbafedcbafedcbafedcbafedcbafedc", "a .git file naming the repository's folder is followed");
+  // A real worktree: its own folder holds HEAD, and commondir names the folder that holds the refs.
+  mkdirSync(join(dir, ".git", "worktrees", "w"), { recursive: true });
+  writeFileSync(join(dir, ".git", "worktrees", "w", "HEAD"), "ref: refs/heads/other\n");
+  writeFileSync(join(dir, ".git", "worktrees", "w", "commondir"), "../..\n");
+  const tree2 = mkdtempSync(join(tmpdir(), "worktree2-"));
+  writeFileSync(join(tree2, ".git"), `gitdir: ${join(dir, ".git", "worktrees", "w")}\n`);
+  assert.equal(toolCommit(pathToFileURL(tree2 + "/")), "fedcbafedcbafedcbafedcbafedcbafedcbafedc", "a worktree's refs are read from its commondir");
   assert.equal(toolCommit(pathToFileURL(mkdtempSync(join(tmpdir(), "nogit-")) + "/")), null);
   assert.match(toolCommit(new URL("../", import.meta.url))!, /^[0-9a-f]{40}$/, "this checkout");
 });
@@ -1165,13 +1265,13 @@ export type Row = {
   omittedSources?: number;
 };
 
-export type BuildInput = { from: string[]; candidates: { file: CandidateFile; text: string }[]; session: Session; robots: Robots; row: RowLimits; toolCommit: string | null };
+export type BuildInput = { from: string[]; candidates: { file: CandidateFile; bytes: Uint8Array }[]; session: Session; robots: Robots; row: RowLimits; toolCommit: string | null };
 export type BuildOutcome =
   | { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } }
   | { ok: false; problem: string };
 
 const SEEDED_NOTE = "A seeded crawl: the sources are a hand-kept list given on the command line, which Ruling 3 does not count as meeting the objective for strangers. A catalog that does is built from a finder's candidate files.";
-const NAME = /^[A-Za-z0-9._-]{1,64}$/;          // a finder or snapshot name: it becomes a path
+const NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/;   // a finder or snapshot name: it becomes a path, so no leading dot (".", "..", a hidden file)
 const PLACE_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 
 const encoder = new TextEncoder();
@@ -1189,7 +1289,7 @@ export function readCandidateFile(text: string): CandidateFile | null {
   for (const c of raw["candidates"]) {
     if (!isRecord(c) || typeof c["address"] !== "string" || (c["place"] !== undefined && !isRecord(c["place"]))) return null;
     const place: Record<string, string | number> = {};
-    if (isRecord(c["place"])) for (const [k, v] of Object.entries(c["place"])) if (PLACE_KEY.test(k) && (typeof v === "string" || typeof v === "number")) place[k] = v;
+    if (isRecord(c["place"])) for (const [k, v] of Object.entries(c["place"])) if (PLACE_KEY.test(k) && ((typeof v === "string" && v.isWellFormed()) || typeof v === "number")) place[k] = v;   // Ruling 12: an ill-formed string is dropped
     candidates.push({ address: c["address"], place });
   }
   return { finder: raw["finder"], snapshot: raw["snapshot"], candidates };
@@ -1201,14 +1301,16 @@ export function toolCommit(checkout: URL): string | null {
   let git = new URL(".git/", checkout);
   const file = read(new URL(".git", checkout));
   if (file !== null && file.startsWith("gitdir: ")) git = new URL(file.slice(8).trim().replace(/\/?$/, "/"), checkout);
+  const common = read(new URL("commondir", git));   // a worktree keeps HEAD in its own folder and the refs in the repository's
+  const refs = common === null ? git : new URL(common.trim().replace(/\/?$/, "/"), git);
   const head = read(new URL("HEAD", git))?.trim();
   if (head === undefined) return null;
   if (/^[0-9a-f]{40}$/.test(head)) return head;
   const ref = head.startsWith("ref: ") ? head.slice(5).trim() : null;
   if (ref === null) return null;
-  const loose = read(new URL(ref, git))?.trim();
+  const loose = read(new URL(ref, refs))?.trim();
   if (loose !== undefined && /^[0-9a-f]{40}$/.test(loose)) return loose;
-  const packed = read(new URL("packed-refs", git));
+  const packed = read(new URL("packed-refs", refs));
   if (packed === null) return null;
   for (const line of packed.split("\n")) { const [sha, name] = line.split(" "); if (name === ref && sha !== undefined && /^[0-9a-f]{40}$/.test(sha)) return sha; }
   return null;
@@ -1222,13 +1324,21 @@ export function toolCommit(checkout: URL): string | null {
 export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
   const { session, robots, row } = input;
   const test = session.test;
-  // 1. Candidates: canonical, de-duplicated, sorted; the rule drops and counts; too many is a refusal before any fetch.
+  // 0. The copies: one file per path, on a case-insensitive file system too.
+  const copyPaths = new Set<string>();
+  for (const { file } of input.candidates) {
+    const key = `${file.finder}/${file.snapshot}`.toLowerCase();
+    if (copyPaths.has(key)) return { ok: false, problem: `two candidate files would both be written as candidates/${file.finder}/${file.snapshot}.json` };
+    copyPaths.add(key);
+  }
+  // 1. Candidates: canonical, de-duplicated, sorted; the rule drops and counts; too many is a refusal before any fetch. The same way twice is recorded once.
   const found = new Map<string, Found[]>();
   let droppedCandidates = 0;
   const add = (address: string, how: Found): void => {
     const parsed = parseSourceAddress(address, { test });
     if (parsed === null) { droppedCandidates++; return; }
-    found.set(parsed.address, [...(found.get(parsed.address) ?? []), how]);
+    const list = found.get(parsed.address) ?? [];
+    if (!list.some((f) => JSON.stringify(f) === JSON.stringify(how))) found.set(parsed.address, [...list, how]);
   };
   for (const a of input.from) add(a, { by: "from" });
   for (const { file } of input.candidates) for (const c of file.candidates) add(c.address, { by: "finder", finder: file.finder, snapshot: file.snapshot, place: c.place });
@@ -1295,15 +1405,15 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
     ...skipped.map((s) => ({ address: s.address, found: found.get(s.address) ?? [], outcome: "skipped", limits: s.limit !== undefined ? [s.limit] : [], dropped: { entries: 0, publications: 0 }, digest: null, definitions: [], untried: 0, refers: [] })),
   ].sort(byKey("address"));
   files.set("sources.json", jsonBytes({ sources: entries }));
-  const candidates = input.candidates.map(({ file, text }) => {
+  const candidates = input.candidates.map(({ file, bytes }) => {
     const path = `candidates/${file.finder}/${file.snapshot}.json`;
-    files.set(path, encoder.encode(text));
+    files.set(path, bytes);   // the bytes read, so another party can compare the input
     return { finder: file.finder, snapshot: file.snapshot, count: file.candidates.length, path };
   });
   const seeded = input.candidates.length === 0;
   files.set("catalog.json", jsonBytes({
     tool: { commit: input.toolCommit },
-    from: input.from.map((a) => parseSourceAddress(a, { test })?.address).filter((a): a is string => a !== undefined).sort(),
+    from: [...new Set(input.from.map((a) => parseSourceAddress(a, { test })?.address).filter((a): a is string => a !== undefined))].sort(),
     candidates,
     droppedCandidates,
     limits: { ...session.limits, paths: PATH_LIMITS, publication: PUBLICATION, row },
@@ -1317,7 +1427,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
 - [ ] **Step 4: Run the tests and the type check**
 
 Run: `npm run check && node --test tests/catalog.test.ts`
-Expected: all pass. The row-size test's limit of 400 bytes was measured on this fixture against the first draft: the SELECTION row with one source was 325 bytes (347 with `omittedSources`) and with two 512; this draft's rows carry the same members for sources without `by`, so the cut still falls between one source and two. If a measurement here disagrees, the test's two numbers (400 and the 100 of the "one contributor alone" case) are the ones to adjust, with the measured sizes in a comment.
+Expected: all pass. The row-size test serves one leaf of the fixture (`ECru8k3C...`) from b and c so that one row exists: measured with this draft's row shape (2026-11-12), that row is 325 bytes with one source, 348 with `omittedSources` and 512 with two, and d's `other` row is 321, so 400 sits between one contributor and two for every row the build writes. The SELECTION closure cannot serve here: 11 of its 12 rows exceed 400 bytes with one source (up to 924) and the build would fail on the first of them.
 
 - [ ] **Step 5: Commit**
 
@@ -1492,7 +1602,7 @@ git commit -m "feat: the catalog's pages, linking a source's own page only when 
 
 **Acceptance Criteria:**
 - With `catalog`, after the starting source is read the walk fetches `<catalog base>said/<SAID>.json`, takes each `serves[].source` that passes the source address rule as a named introduction at depth 1 with `via: [catalog]`, and reports `catalog: { address, listed, taken }`; a row that cannot be read or is not a row is reported on that member as `{ address, listed: 0, taken: 0, reason }` (with `target` for a redirect), `unresolved` stays a list of source addresses, and the walk goes on without the row.
-- When the row lists more than the room left (`sourcesPerRun` minus the start), a random sample of that size is taken; `listed` is the row's count and `taken` the number that got a slot.
+- When the row lists more than the room left (`sourcesPerRun` minus the start), a random sample of that size is taken; `listed` is the row's count and `taken` the number that got a slot from the row (an address the start also introduces by name may enter on that introduction instead, and is then not counted; decision 8).
 - The row's sources join the depth-1 round-robin as one list keyed by the catalog's address; the limit on introductions per source does not apply to the row.
 - The row is not read when the start could not be; catalogs named in visited documents stay in `report.catalogs` and are never fetched.
 
@@ -1758,13 +1868,13 @@ async function catalog(args: string[], io: Io, options: RunOptions): Promise<num
   for (const f of from) if (parseSourceAddress(f, { test: options.test }) === null) return usage(io, FROM_NOTE);
   const outProblem = outDirProblem(out);
   if (outProblem !== null) { io.out(asciiJson({ problems: [outProblem] }) + "\n"); return 1; }
-  const candidates: { file: CandidateFile; text: string }[] = [];
+  const candidates: { file: CandidateFile; bytes: Uint8Array }[] = [];
   for (const path of candidatePaths) {
-    let text: string;
-    try { text = readFileSync(path, "utf8"); } catch { io.out(asciiJson({ problems: [`cannot read ${path}`] }) + "\n"); return 1; }
-    const file = readCandidateFile(text);
+    let bytes: Uint8Array;
+    try { bytes = new Uint8Array(readFileSync(path)); } catch { io.out(asciiJson({ problems: [`cannot read ${path}`] }) + "\n"); return 1; }
+    const file = readCandidateFile(Buffer.from(bytes).toString("utf8"));
     if (file === null) { io.out(asciiJson({ problems: [`${path} is not a candidate file`] }) + "\n"); return 1; }
-    candidates.push({ file, text });
+    candidates.push({ file, bytes });
   }
   const s = new Session(options.limits ?? CATALOG, { test: options.test, resolve: options.resolve });
   const r = await buildCatalog({ from, candidates, session: s, robots: new Robots(s), row: options.row ?? ROW, toolCommit: toolCommit(new URL("../", import.meta.url)) });
@@ -1826,10 +1936,10 @@ cd /Users/seriouscoderone/code/bpm && git add CLAUDE.md && git commit -m "docs: 
 
 ## Self-review
 
-**Spec coverage.** Design "The catalog": the two commands split (`catalog find` refused until step 6, `catalog build` here); the batch's four steps (Task 5: gather, Task 3+4: visit breadth-first, Task 4: fetch/check/scan, Task 5+6: write); the files and their contents (Task 5: `catalog.json` with tool commit, starting sources, finder/snapshot/count/path per candidate file, every limit; `index.json` counted before the cut; `said/<SAID>.json` with counts and the source's `by`; `sources.json` with every way found, outcome and limits, dropped counts, digest, non-verified definitions, untried count and refers; the copied candidate files; Task 6: pages); no file holds the catalog's address or a time, and every file is ASCII (Task 5 test). "What a catalog row may say": every bullet is a Task 5 test or rule (row only for verified served bytes; attribution; publications claimed and only in existing rows; counts are counts of addresses; one publication and 50 referrers per source with counts; 1 MB row with the omitted count over contributors only, never the first; how found checkable with every introducing address; no carry-over; empty build writes nothing; posting open). "Repeatable": fixed order and counts (Tasks 3, 5), byte-identical builds (Task 5 test). "Fetching safely", catalog column (Task 1) and the robots.txt rule (Task 2, applied in Task 4), `disallowed` and `refused-address` kept apart (Tasks 2, 4), both count limits recorded (Task 4). "The walk", `--catalog` (Task 7): row read beside `catalog.json` after the start, named introductions at depth 1 with the catalog as `via`, no per-source introductions limit for the row, sources-per-run applies, random sample with listed/taken, failure on the `catalog` member, catalogs named by sources never fetched. "Readable pages" for a catalog (Task 6): index and per-SAID pages, links only when the source says it has pages, a publication-only source by address, offered-by from the row's `by`, SAID order, no ranking or form, the guards including `pageLink`. "Tests", Catalog: identical builds; a source cannot create a row attributed to another; a SAID only contained has no file (the ghost, Task 5); a letter-case variant that still matches the pattern leaves the file unchanged (Task 5); over the definitions limit cut and reported (Task 4); thousands of publications of one SAID add one to its row (Task 5, 3,000); a row never exceeds the size a walk will read (Task 5, small limit); every source fails writes nothing (Task 5); a robots rule that disallows the tool is obeyed (Task 4). "Acceptance" clause 3 (from the index a person reaches each source's page for a SAID by links alone): Task 6's tests. Ruling 11: untouched in behaviour; `Session.fetch`'s signature absorbs it (Task 1, decision 10) and the catalog build's requests are shown to carry no `Origin` (Task 8). Not here, by the design's own split: `catalog find` and both finders, the WARC fixture and the stranger-by-fixture test (step 6); hosting (step 7).
+**Spec coverage.** Design "The catalog": the two commands split (`catalog find` refused until step 6, `catalog build` here); the batch's four steps (Task 5: gather, Task 3+4: visit breadth-first, Task 4: fetch/check/scan, Task 5+6: write); the files and their contents (Task 5: `catalog.json` with tool commit, starting sources, finder/snapshot/count/path per candidate file, every limit; `index.json` counted before the cut; `said/<SAID>.json` with counts and the source's `by`; `sources.json` with every way found, outcome and limits, dropped counts, digest, non-verified definitions, untried count and refers; the copied candidate files; Task 6: pages); no file holds the catalog's address or a time, and every file is ASCII (Task 5 test). "What a catalog row may say": every bullet is a Task 5 test or rule (row only for verified served bytes; attribution; publications claimed and only in existing rows; counts are counts of addresses; one publication and 50 referrers per source with counts; 1 MB row with the omitted count over contributors only, never the first; how found checkable with every introducing address; no carry-over; empty build writes nothing; posting open). "Repeatable": fixed order and counts (Tasks 3, 5), byte-identical builds (Task 5 test). "Fetching safely", catalog column (Task 1) and the robots.txt rule (Task 2, applied in Task 4), `disallowed` and `refused-address` kept apart (Tasks 2, 4), both count limits recorded (Task 4). "The walk", `--catalog` (Task 7): row read beside `catalog.json` after the start, named introductions at depth 1 with the catalog as `via`, no per-source introductions limit for the row, sources-per-run applies, random sample with listed/taken, failure on the `catalog` member, catalogs named by sources never fetched. "Readable pages" for a catalog (Task 6): index and per-SAID pages, links only when the source says it has pages, a publication-only source by address, offered-by from the row's `by`, SAID order, no ranking or form, the guards including `pageLink`. "Tests", Catalog: identical builds; a source cannot create a row attributed to another; a SAID only contained has no file (the ghost, Task 5); a letter-case variant that still matches the pattern leaves the file unchanged (Task 5); over the definitions limit cut and reported (Task 4); thousands of publications of one SAID add one to its row (Task 5, 3,000); a row never exceeds the size a walk will read (Task 5, small limit); every source fails writes nothing (Task 5); a robots rule that disallows the tool is obeyed (Task 4). "Acceptance" clause 3 (from the index a person reaches each source's page for a SAID by links alone): Task 6's tests. Ruling 11: untouched in behaviour; `Session.fetch`'s signature absorbs it (Task 1, decision 10) and the catalog build's requests are shown to carry no `Origin` (Task 8). Ruling 12: Task 0 (publication fields, reported paths), Task 5 (`place` values; the wire case in its second test). Not here, by the design's own split: `catalog find` and both finders, the WARC fixture and the stranger-by-fixture test (step 6); hosting (step 7).
 
-**Decisions for the gate.** The ten listed above, each marked by what the design fixes and what the plan adds. The ones with a real trade-off: `counts` always present per contributing source (slightly larger rows, deterministic); `untried` as a count rather than a list (a 5,500-definition source would otherwise add 5,000 lines); the robots.txt media type (`text/plain` only, the safe side); the `by` carried into the row (keeps the catalog page equal to the source page); ASCII files (byte-identical across locales); one options object for `Session.fetch` (touches Ruling 11's one call site).
+**Decisions for the gate.** The eleven listed above (the eleventh is Ruling 12, already decided), each marked by what the design fixes and what the plan adds. The ones with a real trade-off: `counts` always present per contributing source (slightly larger rows, deterministic); `untried` as a count rather than a list (a 5,500-definition source would otherwise add 5,000 lines); the robots.txt media type (`text/plain` only, the safe side); the `by` carried into the row (keeps the catalog page equal to the source page); ASCII files (byte-identical across locales); one options object for `Session.fetch` (touches Ruling 11's one call site).
 
-**Placeholders.** `<bead id>` in commit messages is filled by the orchestrator. The row-size test's limits (400 and 100 bytes) were measured against the first draft and are to be confirmed at execution (Task 5, Step 4 says how). Names the plan says to take from the existing file (`FROM_NOTE`, `flag`, the CSP string, `Exhausted`'s names) are read from the code, not invented. No other.
+**Placeholders.** `<bead id>` in commit messages is filled by the orchestrator. The row-size test's limits (400 and 100 bytes) were measured against this draft's row shape on the leaf fixture (2026-11-12). Task 0 names the scan's test file by its expected name and says what to do if it differs. Names the plan says to take from the existing file (`FROM_NOTE`, `flag`, the CSP string, `Exhausted`'s names) are read from the code, not invented. No other.
 
 **Type consistency.** `Candidate`, `Node` and `Extra` live in `crawl.ts` and `walk.ts` imports them; `Visited` extends `Node`; `levels`'s `extra` may return a promise and `nextLevel` takes the awaited list; `SourceVisit` extends `Node` and carries `outcome: Reason | "ok"` and `limits: string[]`, which `sources.json` writes as names only; `ReadSource.bytes` feeds the digest; `Row`, `Found`, `CandidateFile` are defined in `catalog.ts` and imported by `catalogpages.ts`, `cli.ts` and the tests; `BuildInput.candidates` carries the file and its text; `Session.fetch`'s second argument is `FetchMode = { type?: FetchType; asBrowser?: boolean }`; `Fetched`'s ok ending keeps Ruling 11's `anyOrigin` and its non-ok endings carry `status`; `RunOptions.row` is `RowLimits`; `asciiJson` lives in `json.ts` and is imported by `cli.ts`, `catalog.ts` and the cli test.
