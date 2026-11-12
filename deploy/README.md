@@ -39,6 +39,25 @@ The second deployed source, since 2026-11-10: one gym-bp definition, `ECru8k3Cer
 - DNS: `A` and `AAAA` aliases in the `josephleehunsaker.com` zone.
 - Updating it is the same procedure as above with the bucket, configuration and distribution id swapped.
 
+## The header for browser wallets
+
+Ruling 11: a source that wants browser wallets to read it sends `Access-Control-Allow-Origin: *` on `source.json` and on `definitions/*`. Both distributions above, `E3PDWZWR269C2D` (`mad.seriouscoder.one`) and `E8LQQKF16X4MY` (`mad.josephleehunsaker.com`), get it from CloudFront's managed response headers policy "SimpleCORS" (ID `60669652-455b-4ae9-85a4-c4c02393f86c`), which adds `Access-Control-Allow-Origin: *` to responses for simple CORS requests. It is attached to the cache behavior; nothing in the buckets changes.
+
+**Not applied yet.** This step is the operator's, in AWS. The change that wrote this note (2026-11-12) ran no `aws` command and changed neither live source.
+
+In the console, for each distribution: Distributions, the distribution, Behaviors, select the behavior, Edit, "Response headers policy", SimpleCORS, Save changes.
+
+With the CLI, for each distribution id (`AWS_PROFILE=personal`):
+
+```bash
+aws cloudfront get-distribution-config --id <id> --output yaml > dist-config.yaml
+# In the cache behavior, add:  ResponseHeadersPolicyId: 60669652-455b-4ae9-85a4-c4c02393f86c
+# Rename the ETag field to IfMatch.
+aws cloudfront update-distribution --id <id> --cli-input-yaml file://dist-config.yaml
+```
+
+Steps checked against the AWS CloudFront Developer Guide on 2026-11-12. Afterwards `verify` over a definition's address reports that browser wallets can read the file.
+
 ## The robots.txt lines
 
 Placed on 2026-11-10, each in the robots.txt of a site in the maintainer's personal account:
