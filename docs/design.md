@@ -140,7 +140,7 @@ Rules for a source:
 - **`catalogs` introduces catalogs the source's operator finds useful.** A reader who knows one source thereby learns of catalogs, which is how MAD's design says discovery starts ("bootstrapped introductions to available catalogs"). The build writes no catalog address the operator did not put in the configuration.
 - **Size.** A source document and a definition are each at most 1 MB, and the build refuses to write a larger one. At gym-bp's density of references a 1 MB source document lists about 5,500 definitions, but a catalog build fetches at most 500 from one source and a walk 50 (see [Fetching safely](#fetching-safely)). An operator with more than 500 splits into several sources that introduce each other.
 - **The files are the contract, not this tool.** A source can be written by hand or by another tool.
-- **A browser is not expected to read a source.** The walk runs in Node, so a source needs no cross-origin header. A static host works if it sends `.json` files as `application/json` and sends them unencoded when no content encoding is asked for.
+- **A source that wants browser wallets to read it sends `Access-Control-Allow-Origin: *`** on `source.json` and on `definitions/*`. A wallet that runs in a browser reads a source with the browser's own `fetch`, under the browser's rules rather than this tool's routine (see [Fetching safely](#fetching-safely)), and a browser lets a page read an answer from another origin only when that header allows it. The header is optional: a source without it is still a source, and the walk, `get` and `verify`, which run in Node, read it as before; no browser wallet can. `verify` over an address says whether the file it fetched carried the header. The maintainer decided this on 2026-11-12 (decision 11); until then this rule said a browser was not expected to read a source. A static host works if it sends `.json` files as `application/json` and sends them unencoded when no content encoding is asked for.
 
 ### The robots.txt line
 
@@ -497,7 +497,7 @@ One command, `mad-discovery`:
 | Command | What it does |
 |---|---|
 | `build <folder> --config <file> --out <folder>` | Makes a source. |
-| `verify <file or address> <SAID>` | Runs the byte check. The SAID is required: the tool does not look for one inside a document, which would need the name of the SAID field. |
+| `verify <file or address> <SAID>` | Runs the byte check. The SAID is required: the tool does not look for one inside a document, which would need the name of the SAID field. Over an address it also says whether browser wallets can read the file, that is whether it was sent with `Access-Control-Allow-Origin: *`; without the header it does not fail. |
 | `who <SAID> --from <address> [--catalog <address>]` | The walk. |
 | `get <SAID> --from <address> --out <folder>` | Fetches a definition and everything that appears in it. |
 | `catalog find --finder <name> --out <folder> [--snapshot <name>]...` | Runs one finder over its public input and writes one candidate file per snapshot. It fetches no address a stranger chose. |
@@ -623,6 +623,10 @@ The maintainer made these on 2026-11-09: first by approving the second draft wit
 After review, when the second epic started (2026-11-10):
 
 10. **Finders, after the crawl check.** The three newest Common Crawl crawls hold no capture of any host the maintainer controls, so the live check could not run on his hosts as written. Both routes: the `Mad-Source` lines went up anyway on `seriouscoder.one` and `josephleehunsaker.com`, with a second source at `mad.josephleehunsaker.com`, so the robots route completes if Common Crawl ever captures those hosts; and Ruling 9 is amended: a GitHub-topic finder joins the robots finder in step 6, because the first real adopter needs it. The live clause is met by either finder. (Ruling 10)
+
+On 2026-11-12, for the maintainer's KERI wallet, which runs in a browser:
+
+11. **Browser wallets may read a source.** A source that wants them to sends `Access-Control-Allow-Origin: *` on `source.json` and on `definitions/*`. The header is optional; a source without it is still a source for the tools here. `verify` over an address reports it and does not fail without it. (Ruling 11)
 
 ## Defaults chosen here
 
