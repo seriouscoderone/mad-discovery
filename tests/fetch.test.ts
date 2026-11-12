@@ -32,6 +32,15 @@ test("an answer says whether it was sent with Access-Control-Allow-Origin: *, an
   origin.behave = null;
 });
 
+test("a repeated Access-Control-Allow-Origin is not *: browsers refuse more than one value", async () => {
+  for (const values of [["*", "*"], ["*", "https://x.example"]]) {
+    origin.behave = (_req, res) => { res.setHeader("access-control-allow-origin", values); return false; };
+    const r = await fetchLocal("x.json");
+    assert.equal(r.outcome, "ok", values.join(", "));
+    if (r.outcome === "ok") assert.equal(r.anyOrigin, false, values.join(", "));
+  }
+});
+
 // What every request carries today; Node adds host and connection.
 const sentHeaders = (host: string) => ({ accept: "application/json", "accept-encoding": "identity", "user-agent": USER_AGENT, host, connection: "close" });
 
