@@ -56,7 +56,7 @@ aws cloudfront get-distribution-config --id <id> --output yaml > dist-config.yam
 aws cloudfront update-distribution --id <id> --cli-input-yaml file://dist-config.yaml
 ```
 
-Steps checked against the AWS CloudFront Developer Guide on 2026-11-12. Afterwards `verify` over a definition's address reports that browser wallets can read the file.
+Steps checked against the AWS CloudFront Developer Guide on 2026-11-12. Afterwards `verify` over a definition's address reports that browser wallets can read the file: it asks with an `Origin` header, as a browser does, and SimpleCORS adds the header only to such a request, so a plain `curl -I` without one does not show it.
 
 ## The robots.txt lines
 
