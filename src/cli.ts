@@ -100,7 +100,8 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
   if (/^https?:\/\//i.test(target)) {
     const address = parseHttpsAddress(target, { test: options.test });
     if (address === null) { io.out(asciiJson({ verified: false, expected: said, address: target, reason: "refused-address" }) + "\n"); return 1; }
-    const f = await session(options).fetch(address);
+    // Asked as a browser would, with an Origin header: a host may send Access-Control-Allow-Origin only to such a request.
+    const f = await session(options).fetch(address, true);
     if (f.outcome !== "ok") { io.out(asciiJson({ verified: false, expected: said, address, reason: f.outcome, ...redirectTarget(f) }) + "\n"); return 1; }
     bytes = f.bytes;
     where = { address };

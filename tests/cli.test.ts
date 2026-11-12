@@ -218,6 +218,39 @@ test("verify over an address says whether browser wallets can read the file, and
   } finally { a.behave = null; await a.close(); }
 });
 
+test("verify asks as a browser would: a host that sends the header only to a request with Origin is reported readable", async () => {
+  const a = await Origin.start();
+  try {
+    a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const definition = `${a.origin}/mad/definitions/${SELECTION}.json`;
+    const origins: unknown[] = [];
+    // As CloudFront's SimpleCORS policy does: the header only when the request carries Origin.
+    a.behave = (req, res) => { origins.push(req.headers.origin); if (req.headers.origin !== undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
+    const c = capture();
+    assert.equal(await main(["verify", definition, SELECTION], c.io, local), 0);
+    assert.deepEqual(c.json(), { verified: true, said: SELECTION, address: definition, bytes: compactInputs.get(SELECTION)!.length, browserWallets: CAN_READ });
+    assert.deepEqual(origins, ["https://wallet.invalid"]);
+    // A host that echoes the request's origin back allows that one origin, not every wallet.
+    a.behave = (req, res) => { if (typeof req.headers.origin === "string") res.setHeader("access-control-allow-origin", req.headers.origin); return false; };
+    const e = capture();
+    assert.equal(await main(["verify", definition, SELECTION], e.io, local), 0);
+    assert.equal(e.json().browserWallets, CANNOT_READ);
+  } finally { a.behave = null; await a.close(); }
+});
+
+test("who and get send no Origin header: only verify asks as a browser", async () => {
+  const a = await Origin.start();
+  try {
+    const { address } = a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const seen: string[][] = [];
+    a.behave = (req) => { seen.push(Object.keys(req.headers).sort()); return false; };
+    assert.equal(await main(["who", SELECTION, "--from", address], capture().io, local), 0);
+    assert.equal(await main(["get", SELECTION, "--from", address, "--out", join(mkdtempSync(join(tmpdir(), "get-")), "out")], capture().io, local), 0);
+    assert.ok(seen.length >= 4, "who and get each fetched the source and the definition");
+    for (const names of seen) assert.deepEqual(names, ["accept", "accept-encoding", "connection", "host", "user-agent"]);
+  } finally { a.behave = null; await a.close(); }
+});
+
 test("verify of a file says nothing about browsers: no answer, no header", () => {
   const r = run("verify", join(fixtures, "compact", `${QVI}.json`), QVI);
   assert.equal(r.code, 0);

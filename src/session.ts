@@ -50,15 +50,15 @@ export class Session {
     return null;
   }
 
-  /** One request within the request, host and run limits, charged to its host whatever the outcome. One request at a time per host is each's job, not this one's. */
-  async fetch(address: string): Promise<Fetched> {
+  /** One request within the request, host and run limits, charged to its host whatever the outcome. One request at a time per host is each's job, not this one's. asBrowser is verify's alone (see fetchJson). */
+  async fetch(address: string, asBrowser = false): Promise<Fetched> {
     const href = parseHttpsAddress(address, { test: this.test });
     if (href === null) return { outcome: "refused-address", read: 0, ms: 0 };
     const h = this.host(Session.hostOf(href));
     const timeoutMs = Math.min(this.limits.requestMs, this.limits.hostMs - h.ms, this.remainingRun());
     const maxBytes = Math.min(this.limits.fileBytes, this.limits.hostBytes - h.bytes);
     if (timeoutMs <= 0 || maxBytes <= 0) return { outcome: "timed-out", read: 0, ms: 0 };
-    const r = await fetchJson(href, { test: this.test, resolve: this.resolve, now: this.now, timeoutMs, maxBytes });
+    const r = await fetchJson(href, { test: this.test, resolve: this.resolve, now: this.now, timeoutMs, maxBytes, asBrowser });
     h.ms += r.ms;
     h.bytes += r.read;
     // A body cut by the host's remaining bytes rather than the file limit means the host is used up, not that the file is bad.

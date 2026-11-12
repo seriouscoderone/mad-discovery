@@ -32,6 +32,23 @@ test("an answer says whether it was sent with Access-Control-Allow-Origin: *, an
   origin.behave = null;
 });
 
+// What every request carries today; Node adds host and connection.
+const sentHeaders = (host: string) => ({ accept: "application/json", "accept-encoding": "identity", "user-agent": USER_AGENT, host, connection: "close" });
+
+test("a request carries exactly the headers it always did, and no Origin", async () => {
+  let seen: Record<string, unknown> | null = null;
+  origin.behave = (req) => { seen = { ...req.headers }; return false; };
+  assert.equal((await fetchLocal("x.json")).outcome, "ok");
+  assert.deepEqual(seen, sentHeaders(new URL(origin.origin).host));
+});
+
+test("asked to fetch as a browser would, a request also carries Origin: https://wallet.invalid, and nothing else changes", async () => {
+  let seen: Record<string, unknown> | null = null;
+  origin.behave = (req) => { seen = { ...req.headers }; return false; };
+  assert.equal((await fetchLocal("x.json", { asBrowser: true })).outcome, "ok");
+  assert.deepEqual(seen, { ...sentHeaders(new URL(origin.origin).host), origin: "https://wallet.invalid" });
+});
+
 test("content types: application/json and +json pass, others are invalid", async () => {
   for (const [type, expected] of [["application/schema+json", "ok"], ["Application/JSON; charset=utf-8", "ok"], ["text/plain", "invalid"], ["text/json", "invalid"], ["application/octet-stream", "invalid"]] as const) {
     origin.behave = (_req, res) => { res.setHeader("content-type", type); res.end("{}"); return true; };

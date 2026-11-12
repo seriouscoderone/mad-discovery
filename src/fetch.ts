@@ -6,6 +6,12 @@ import { isLoopback, isPublic, parseIPv4 } from "./ip.ts";
 
 export const USER_AGENT = "mad-discovery (+https://github.com/seriouscoderone/mad-discovery)";
 
+/**
+ * The Origin a request made as a browser would carries: a browser's cross-origin fetch always sends one, and a host may add
+ * Access-Control-Allow-Origin only when it is there. .invalid is reserved (RFC 6761), so no host has allowed it by name.
+ */
+export const BROWSER_ORIGIN = "https://wallet.invalid";
+
 /** The fixed list of docs/design.md "Outcomes". disallowed is the catalog build's and skipped is the scheduler's; neither is produced here. */
 export type Outcome = "ok" | "truncated" | "not-found" | "unreachable" | "timed-out" | "redirected" | "refused-address" | "disallowed" | "invalid" | "skipped";
 
@@ -23,6 +29,7 @@ export type FetchOptions = AddressOptions & {
   maxBytes: number;    // a longer body is refused while it is read
   resolve?: Resolve;   // tests inject one; the default is resolveNames
   now?: () => number;  // tests inject a clock
+  asBrowser?: boolean; // verify's question about browser wallets: also send Origin: BROWSER_ORIGIN; changes nothing else
 };
 
 /** c-ares through node:dns/promises, cancelled at the deadline: unlike dns.lookup its queries can be timed out and abandoned. */
@@ -117,7 +124,7 @@ export function fetchJson(address: string, opts: FetchOptions): Promise<Fetched>
         agent: secure ? httpsAgent : httpAgent,
         lookup,
         rejectUnauthorized: true,
-        headers: { accept: "application/json", "accept-encoding": "identity", "user-agent": USER_AGENT },
+        headers: { accept: "application/json", "accept-encoding": "identity", "user-agent": USER_AGENT, ...(opts.asBrowser === true ? { origin: BROWSER_ORIGIN } : {}) },
       };
       const onResponse = (res: http.IncomingMessage): void => {
         const status = res.statusCode ?? 0;
