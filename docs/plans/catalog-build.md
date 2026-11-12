@@ -168,7 +168,7 @@ export const ROW: RowLimits = { referrersPerSource: 50, rowBytes: FILE_BYTES };
 ```ts
 /** JSON with every character outside printable ASCII as a \u escape, so a stranger's string cannot reach a terminal raw. */
 export function asciiJson(value: unknown): string {
-  return JSON.stringify(value, null, 2).replace(/[\u007f-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+  return JSON.stringify(value, null, 2).replace(/[\u007f-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 ```
 
@@ -970,18 +970,18 @@ const bySource = <T extends { source: string }>(xs: T[]) => [...xs].sort((p, q) 
 
 test("two sources that never link, named with --from, meet in one row; two builds are byte-identical", async () => {
   const [a, b] = [await start(), await start()];
-  const aAddr = a.source("mad/", { serve: [SELECTION], by: "EKxyAID", publications: [{ target: SELECTION, name: "from a é", description: "d", tags: ["t"], collection: "c" }] }, inputs).address;
+  const aAddr = a.source("mad/", { serve: [SELECTION], by: "EKxyAID", publications: [{ target: SELECTION, name: "from a \u00e9", description: "d", tags: ["t"], collection: "c" }] }, inputs).address;
   const bAddr = b.source("mad/", { serve: [SELECTION] }, inputs).address;
   const r = await build([bAddr, aAddr]);
   assert.ok(r.ok); if (!r.ok) return;
   const sel = row(r.files, SELECTION);
   assert.deepEqual(sel.serves.map((s) => s.source), [aAddr, bAddr].sort(), "the build's order is sorted at depth 0");
-  assert.deepEqual(sel.publications, [{ source: aAddr, by: "EKxyAID", publication: { target: SELECTION, name: "from a é", description: "d", tags: ["t"], collection: "c" } }], "the source's stated by rides with a publication that has none");
+  assert.deepEqual(sel.publications, [{ source: aAddr, by: "EKxyAID", publication: { target: SELECTION, name: "from a \u00e9", description: "d", tags: ["t"], collection: "c" } }], "the source's stated by rides with a publication that has none");
   assert.deepEqual(sel.counts, bySource([{ source: aAddr, publications: 1, referrers: 0 }, { source: bAddr, publications: 0, referrers: 0 }]));
   assert.ok(/^[\x20-\x7e\n]*$/.test(text(r.files, `said/${SELECTION}.json`)), "ASCII-only: the e-acute is escaped");
   const index = json(r.files, "index.json") as { saids: { said: string; sources: number; names: { name: string; source: string }[] }[] };
   assert.equal(index.saids.length, 12, "the selection's closure");
-  assert.deepEqual(index.saids.find((x) => x.said === SELECTION), { said: SELECTION, sources: 2, names: [{ name: "from a é", source: aAddr }] });
+  assert.deepEqual(index.saids.find((x) => x.said === SELECTION), { said: SELECTION, sources: 2, names: [{ name: "from a \u00e9", source: aAddr }] });
   assert.deepEqual(index.saids.map((x) => x.said), [...index.saids.map((x) => x.said)].sort());
   const sources = json(r.files, "sources.json") as { sources: { address: string; found: unknown[]; outcome: string; limits: string[]; digest: string | null; definitions: unknown[]; untried: number; refers: unknown[] }[] };
   assert.deepEqual(sources.sources.map((s) => s.address), [aAddr, bAddr].sort());
