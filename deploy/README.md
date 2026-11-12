@@ -43,9 +43,9 @@ The second deployed source, since 2026-11-10: one gym-bp definition, `ECru8k3Cer
 
 Ruling 11: a source that wants browser wallets to read it sends `Access-Control-Allow-Origin: *` on `source.json` and on `definitions/*`. Both distributions above, `E3PDWZWR269C2D` (`mad.seriouscoder.one`) and `E8LQQKF16X4MY` (`mad.josephleehunsaker.com`), get it from CloudFront's managed response headers policy "SimpleCORS" (ID `60669652-455b-4ae9-85a4-c4c02393f86c`), which adds `Access-Control-Allow-Origin: *` to responses for simple CORS requests. It is attached to the cache behavior; nothing in the buckets changes.
 
-**Not applied yet.** This step is the operator's, in AWS. The change that wrote this note (2026-11-12) ran no `aws` command and changed neither live source.
+**Applied on 2026-11-12**, with the maintainer's go-ahead, by the CLI steps below on both distributions (each had only its default behavior and no response headers policy before). Checked afterwards: `verify` over `definitions/ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1.json` on each host reports that browser wallets can read the file; `source.json` on each host carries `access-control-allow-origin: *` when asked with an `Origin` header and no such header without one, as SimpleCORS specifies.
 
-In the console, for each distribution: Distributions, the distribution, Behaviors, select the behavior, Edit, "Response headers policy", SimpleCORS, Save changes.
+In the console the same change is: Distributions, the distribution, Behaviors, select the behavior, Edit, "Response headers policy", SimpleCORS, Save changes.
 
 With the CLI, for each distribution id (`AWS_PROFILE=personal`):
 
