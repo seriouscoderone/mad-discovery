@@ -96,6 +96,7 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
   if (target === undefined || said === undefined || !isSaid(said)) return usage(io, "The SAID is required and must match the pattern.");
   let bytes: Uint8Array;
   let where: { address?: string } = {};
+  let browsers: { browserWallets?: string } = {};
   if (/^https?:\/\//i.test(target)) {
     const address = parseHttpsAddress(target, { test: options.test });
     if (address === null) { io.out(asciiJson({ verified: false, expected: said, address: target, reason: "refused-address" }) + "\n"); return 1; }
@@ -103,18 +104,20 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
     if (f.outcome !== "ok") { io.out(asciiJson({ verified: false, expected: said, address, reason: f.outcome, ...redirectTarget(f) }) + "\n"); return 1; }
     bytes = f.bytes;
     where = { address };
+    // Information for the operator, never a failure: a source need not be readable from a browser.
+    browsers = { browserWallets: f.anyOrigin ? "can read this file: it was sent with Access-Control-Allow-Origin: *" : "cannot read this file: it was sent without Access-Control-Allow-Origin: *" };
   } else {
     try { bytes = new Uint8Array(readFileSync(target)); }
     catch { io.out(asciiJson({ verified: false, expected: said, reason: `cannot read ${target}` }) + "\n"); return 1; }
   }
-  if (checkSaid(bytes, said)) { io.out(asciiJson({ verified: true, said, ...where, bytes: bytes.length }) + "\n"); return 0; }
+  if (checkSaid(bytes, said)) { io.out(asciiJson({ verified: true, said, ...where, bytes: bytes.length, ...browsers }) + "\n"); return 0; }
   const needle = Buffer.from(said, "ascii");
   const present = Buffer.from(bytes).includes(needle);
   const computed = present ? saidOf(replaceAll(bytes, needle, FILL)) : saidOf(bytes);
   const reason = !present ? "the SAID is not in the bytes"
     : computed !== said ? "the digest of the hashed form is not the SAID"
     : "the hashed form does not rebuild to the served bytes";
-  io.out(asciiJson({ verified: false, expected: said, ...where, computed, reason }) + "\n");
+  io.out(asciiJson({ verified: false, expected: said, ...where, computed, reason, ...browsers }) + "\n");
   return 1;
 }
 

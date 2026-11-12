@@ -22,6 +22,16 @@ test("a JSON answer comes back as its bytes, with what was read", async () => {
   if (r.outcome === "ok") { assert.deepEqual(r.bytes, body); assert.equal(r.read, body.length); assert.ok(r.ms >= 0); }
 });
 
+test("an answer says whether it was sent with Access-Control-Allow-Origin: *, and only * counts", async () => {
+  for (const [value, expected] of [[null, false], ["*", true], [" * ", true], ["https://wallet.example", false], ["null", false]] as const) {
+    origin.behave = (_req, res) => { if (value !== null) res.setHeader("access-control-allow-origin", value); return false; };
+    const r = await fetchLocal("x.json");
+    assert.equal(r.outcome, "ok", String(value));
+    if (r.outcome === "ok") assert.equal(r.anyOrigin, expected, String(value));
+  }
+  origin.behave = null;
+});
+
 test("content types: application/json and +json pass, others are invalid", async () => {
   for (const [type, expected] of [["application/schema+json", "ok"], ["Application/JSON; charset=utf-8", "ok"], ["text/plain", "invalid"], ["text/json", "invalid"], ["application/octet-stream", "invalid"]] as const) {
     origin.behave = (_req, res) => { res.setHeader("content-type", type); res.end("{}"); return true; };

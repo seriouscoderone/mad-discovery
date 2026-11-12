@@ -11,7 +11,7 @@ export type Outcome = "ok" | "truncated" | "not-found" | "unreachable" | "timed-
 
 /** What one request ended in. read and ms are charged to the host whatever the outcome. */
 export type Fetched =
-  | { outcome: "ok"; bytes: Uint8Array; read: number; ms: number }
+  | { outcome: "ok"; bytes: Uint8Array; anyOrigin: boolean; read: number; ms: number }
   | { outcome: "redirected"; target: string | null; read: number; ms: number }
   | { outcome: "not-found" | "unreachable" | "timed-out" | "refused-address" | "invalid"; read: number; ms: number };
 
@@ -55,7 +55,7 @@ function isTimeout(e: unknown): boolean {
 }
 
 type Ending =
-  | { outcome: "ok"; bytes: Uint8Array }
+  | { outcome: "ok"; bytes: Uint8Array; anyOrigin: boolean }
   | { outcome: "redirected"; target: string | null }
   | { outcome: "not-found" | "unreachable" | "timed-out" | "refused-address" | "invalid" };
 
@@ -138,7 +138,9 @@ export function fetchJson(address: string, opts: FetchOptions): Promise<Fetched>
           if (read > opts.maxBytes) { finish({ outcome: "invalid" }); return; }
           chunks.push(chunk);
         });
-        res.on("end", () => finish({ outcome: "ok", bytes: new Uint8Array(Buffer.concat(chunks)) }));
+        // Whether a page on any origin may read this answer: what a browser wallet needs (docs/design.md "Rules for a source").
+        const anyOrigin = res.headers["access-control-allow-origin"]?.trim() === "*";
+        res.on("end", () => finish({ outcome: "ok", bytes: new Uint8Array(Buffer.concat(chunks)), anyOrigin }));
         res.on("error", () => finish({ outcome: "unreachable" }));
       };
       req = secure ? https.request(options, onResponse) : http.request(options, onResponse);

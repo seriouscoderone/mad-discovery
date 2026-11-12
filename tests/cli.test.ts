@@ -23,6 +23,8 @@ const capture = () => { const o: string[] = [], e: string[] = []; const io: Io =
 const local = { test: true, limits: { ...WALK, requestMs: 2000, runMs: 10_000 } };
 const SELECTION = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY";
 const compactInputs = readInputs(join(fixtures, "compact")).inputs;
+const CAN_READ = "can read this file: it was sent with Access-Control-Allow-Origin: *";
+const CANNOT_READ = "cannot read this file: it was sent without Access-Control-Allow-Origin: *";
 
 test("build writes a source and reports", () => {
   const out = join(mkdtempSync(join(tmpdir(), "out-")), "site");
@@ -173,7 +175,7 @@ test("verify over an address fetches through the routine", async () => {
     const address = `${a.origin}/mad/definitions/${SELECTION}.json`;
     let c = capture();
     assert.equal(await main(["verify", address, SELECTION], c.io, local), 0);
-    assert.deepEqual(c.json(), { verified: true, said: SELECTION, address, bytes: compactInputs.get(SELECTION)!.length });
+    assert.deepEqual(c.json(), { verified: true, said: SELECTION, address, bytes: compactInputs.get(SELECTION)!.length, browserWallets: CANNOT_READ });
     c = capture();
     assert.equal(await main(["verify", address, QVI], c.io, local), 1);
     assert.equal(c.json().reason, "the SAID is not in the bytes");
@@ -188,6 +190,38 @@ test("verify over an address fetches through the routine", async () => {
     assert.equal(await main(["verify", address, SELECTION], c.io), 1, "outside tests the local address fails the rule");
     assert.equal(c.json().reason, "refused-address");
   } finally { await a.close(); }
+});
+
+test("verify over an address says whether browser wallets can read the file, and the header never changes the exit status", async () => {
+  const a = await Origin.start();
+  try {
+    const { address: source } = a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const definition = `${a.origin}/mad/definitions/${SELECTION}.json`;
+    // A mixed source: the source document carries the header, the definition does not.
+    a.behave = (req, res) => { if (req.url === "/mad/source.json") res.setHeader("access-control-allow-origin", "*"); return false; };
+    let c = capture();
+    assert.equal(await main(["verify", definition, SELECTION], c.io, local), 0, "absence of the header is not a failure");
+    assert.equal(c.json().verified, true);
+    assert.equal(c.json().browserWallets, CANNOT_READ);
+    c = capture();
+    assert.equal(await main(["verify", source, SELECTION], c.io, local), 1, "the source document is not the definition: the byte check fails as before");
+    assert.equal(c.json().browserWallets, CAN_READ, "reported after the existing checks, whatever they found");
+    // The whole source carries it.
+    a.behave = (_req, res) => { res.setHeader("access-control-allow-origin", "*"); return false; };
+    c = capture();
+    assert.equal(await main(["verify", definition, SELECTION], c.io, local), 0);
+    assert.deepEqual(c.json(), { verified: true, said: SELECTION, address: definition, bytes: compactInputs.get(SELECTION)!.length, browserWallets: CAN_READ });
+    // A wrong SAID still exits 1 with the header present.
+    c = capture();
+    assert.equal(await main(["verify", definition, QVI], c.io, local), 1);
+    assert.equal(c.json().browserWallets, CAN_READ);
+  } finally { a.behave = null; await a.close(); }
+});
+
+test("verify of a file says nothing about browsers: no answer, no header", () => {
+  const r = run("verify", join(fixtures, "compact", `${QVI}.json`), QVI);
+  assert.equal(r.code, 0);
+  assert.ok(!("browserWallets" in r.json));
 });
 
 test("the usage names four commands", () => {
