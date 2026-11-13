@@ -18,7 +18,7 @@ From `docs/design.md`; every task's requirements include these, and the step 1 a
 
 - **Limits, catalog build column:** one request 10 s; one file 1 MB; 500 definitions from one source in SAID order; 10 introductions from one source (the first ten listed, in address order); contained SAIDs recorded from one definition, 200, and from one source, 5,000, lowest SAID first, the rest counted but not recorded (stress test, branch 1: what the build keeps in memory is bounded, not only what it fetches); introduction depth 3; 1,000 sources per run; 120 s and 100 MB per host; 8 hosts in flight; no clock for the whole run. A count limit cuts in a fixed order and the source is `truncated` with the limits that cut it, in table order (`definitions`, `introductions`, `contained`); a source whose host uses up its time or bytes is dropped whole (`timed-out`) and the host's sources not yet started are `skipped` with the limit's name. Row limits: from one source a row takes one publication of the SAID (the first in its document; the rest are counted) and at most 50 definitions that contain the SAID, lowest SAID first, with the full count stated; a row is at most 1 MB, keeping contributing sources in the build's order up to that size and stating how many it left out. All in `src/limits.ts`; `catalog.json` writes every limit the build ran with, the path and publication limits included.
 - **Order and repeatability:** sources are taken breadth-first in the order the walk uses (introducing sources in address order, each source's introductions in address order, one from each in turn; a catalog build asks about no SAID, so nothing is `named`). Candidates named with `--from` and read from candidate files are de-duplicated and visited in sorted order at depth 0; if more remain than the limit on sources per run the build stops, writes nothing and reports the count. What a build includes is decided by counts and fixed order, never by which answer arrived first. Two builds of the same inputs over sources that answer alike produce byte-identical files. No file holds the catalog's own address; no file holds a time. Every file the build composes is written ASCII-only, with the same `\u` escaping as the walk's report; a copied candidate file is the one exception: it is the bytes read, so another party can compare it.
-- **Strings (Ruling 12):** a stranger's string that is not well-formed Unicode (a lone surrogate) fails its rule as a control character does: a publication with one is dropped and counted by the reader; a JSON Pointer path whose key holds one is not reported (the occurrence is still counted); a candidate file's `place` value with one is dropped. A browser wallet's store cannot hold such text and refuses the whole file it sits in.
+- **Strings (Ruling 12):** a stranger's string that is not well-formed Unicode (a lone surrogate) fails its rule as a control character does: a publication with one is dropped and counted by the reader; a JSON Pointer path whose key holds one is not reported (the occurrence is still counted); a candidate file's `place` value with one is dropped. A browser wallet's store cannot hold such text and refuses the whole file it sits in. **Ruling 13** adds, for a publication's strings, the characters that reverse displayed text (the bidirectional controls) or do not show (the invisible format characters and the tag characters), refused like control characters; the joiners U+200C and U+200D stay. The lists are in Task 0.
 - **Rows:** a SAID has a row only when a visited source served bytes for it that passed the check; a SAID that definitions contain but no source serves has no row and appears nowhere. Every statement is attributed to the source address it was fetched from; nothing in one source's files can create or change a row attributed to another. Publications are recorded as claimed, only in rows that exist, and carry the source document's `by` when the publication has none (stated, never verified). A count of sources is a count of addresses and is reported as such. No row is carried over; a source that cannot be reached adds nothing and is listed with its outcome. An empty build (no source `ok` or `truncated`) writes nothing and exits non-zero. Posting is open: no build leaves a source out.
 - **Files** (beside `catalog.json` under fixed names): `catalog.json` (how it was built: the tool's commit read from the checkout, the starting sources, the finder, snapshot and copied path of each candidate file, every limit; a seeded crawl says so in the design's words), `index.json` (every SAID with a row, sorted; for each the number of source addresses that served it, counted before any row cut, and the names its publications give it, each beside the source that gave it), `said/<SAID>.json` (one row: `said`, `serves`, `publications`, `referrers`, each entry as in the walk's report without `via`, plus the counts; no `from`, `unresolved`, `catalogs` or `reached`), `sources.json` (every address tried: every way it was found, its outcome with the limits that cut it, the counts of dropped entries, a hex Blake3 digest of the source document bytes read, each fetched definition that did not end `verified` with its outcome, the number of definitions never tried, and each `refers` entry the scan did not find), `candidates/<finder>/<snapshot>.json` (each candidate file the build was given, byte for byte, so another party can compare), `pages/index.html`, `pages/<SAID>/index.html`, `pages/style.css`. Outcomes are names only: no error text, no redirect target, no timings enter a catalog's files.
 - **robots.txt:** a catalog build obeys the robots.txt group for `mad-discovery`, or else the group for `*`, fetched once per host per build. A 4xx answer means no restrictions. A 5xx answer, no answer or a redirect means the host is skipped with the outcome `disallowed`; an address the rule or the connection check refuses keeps its own outcome, `refused-address`. The walk does not consult robots.txt. The robots.txt fetch goes through the one fetch routine, which gains a text mode (`text/plain`); everything else about it (address rule, resolve-once, size, deadline) is unchanged, and it sends no `Origin` header: Ruling 11's `asBrowser` is `verify`'s alone, and a catalog build's requests carry exactly the headers a walk's do. The matcher is iterative and bounded: a rule longer than 512 characters is ignored, at most 1,000 rules are kept per group, and no rule can make a match take more than a few milliseconds.
@@ -40,7 +40,7 @@ The design fixes the files' members in prose; this plan fixes their JSON. Each i
 8. **`who --catalog`'s sample** uses `crypto.randomInt`; the row's addresses join the depth-1 round-robin as one more introducing list keyed by the catalog's address; the row is read only after the start was. `taken` counts the slots the row filled: a row address the starting source also introduces by name, whose list sorts ahead of the catalog's in the round-robin, enters on that introduction with `via: [from]` and is not counted, as the start itself is not when the row lists it.
 9. **ASCII files.** Every file the build composes is written with the walk report's `\u` escaping (`asciiJson`, moved to `src/json.ts`), so a row shown on a terminal cannot redraw it and two builders' files are byte-identical regardless of locale. A copied candidate file is the bytes read, not re-encoded; step 6's finders write those files through `asciiJson`, so the copies are ASCII as well (stress test, branch 6: a note for the step 6 plan).
 10. **One options object for `Session.fetch`.** Ruling 11 gave `Session.fetch` a second positional argument (`asBrowser`); this plan needs a second mode (`type`). Both become members of one options object, `fetch(address, { type?, asBrowser? })`, and `verify`'s call changes to match. Nothing about `verify`'s behaviour changes.
-11. **Well-formed strings (Ruling 12, bpm-7h1.14).** Raised by the Fortoid session: a browser wallet's store cannot hold a lone surrogate, so it refuses any file holding one, and one hostile publication name would make a row and `index.json` unreadable to every wallet. The maintainer adopted the rule on 2026-11-12: `String.prototype.isWellFormed()` joins the control-character check wherever a stranger's string is accepted. Task 0 puts it in the source rules and the scan; Task 5 applies it to `place` values. A format rule, not an exclusion list.
+11. **Well-formed strings (Ruling 12, bpm-7h1.14).** Raised by the Fortoid session: a browser wallet's store cannot hold a lone surrogate, so it refuses any file holding one, and one hostile publication name would make a row and `index.json` unreadable to every wallet. The maintainer adopted the rule on 2026-11-12: `String.prototype.isWellFormed()` joins the control-character check wherever a stranger's string is accepted. Task 0 puts it in the source rules and the scan; Task 5 applies it to `place` values. A format rule, not an exclusion list. **Ruling 13 (bpm-7h1.18, issue #3)** joins it in Task 0: the bidirectional controls and the invisible format characters are refused in a publication's strings, the joiners allowed, one rule shared with the wallet.
 12. **What the build keeps is bounded (stress test, branch 1).** The network limits bound what a build fetches, not what it keeps: a contained SAID's record (paths included) can be a hundred times its 44 bytes on the wire. Two count limits, `CONTAINED = { perDefinition: 200, perSource: 5_000 }`, cut the recording lowest SAID first; the rest are counted (`omittedContained`, per definition and per source, in `sources.json`) and the source is `truncated` with `contained`. `refers` entries are still checked against the full scan. The design's limits table gains the two rows.
 13. **The seeded note reaches the pages (stress test, branch 2).** `catalog.json`'s "seeded" sentence is read by nobody who matters; the catalog's index page carries it when the build was seeded, so a person sees that the catalog is a hand-kept list and not a search over strangers. Rows are unchanged.
 
@@ -70,18 +70,19 @@ Dependencies between tasks: 0 -> 1 -> 2 -> 4; 1 -> 3 -> 7; 3 and 4 -> 5 -> 6; 5,
 
 ---
 
-### Task 0: A stranger's string is well-formed Unicode (Ruling 12)
+### Task 0: A stranger's string is well-formed Unicode and holds no text-reversing or invisible character (Rulings 12 and 13)
 
-Asked by the wallet's session as `github.com/seriouscoderone/mad-discovery/issues/1`; when this task's commit lands, name it there (the issue's "done when").
+Asked by the wallet's session as `github.com/seriouscoderone/mad-discovery/issues/1` (Ruling 12) and `issues/3` (Ruling 13); when this task's commit lands, name it on both (their "done when").
 
 **Files:**
 - Modify: `src/source.ts`, `src/scan.ts`, `tests/config.test.ts`, the test file that covers `paths` (`tests/scan.test.ts`; if the scan's tests live in another file, append there)
 
 **Interfaces:**
-- Produces: no new names. `validatePublication` refuses a `name`, `description`, `collection` or tag that is not well-formed Unicode with a problem naming "well-formed Unicode"; `paths()` leaves out a pointer whose key is not well-formed and still counts the occurrence.
+- Produces: no new names. `validatePublication` refuses a `name`, `description`, `collection` or tag that is not well-formed Unicode with a problem naming "well-formed Unicode", and one that holds a bidirectional control or an invisible format character (Ruling 13's list) with a problem naming "a control or format character"; `paths()` leaves out a pointer whose key is not well-formed and still counts the occurrence.
 
 **Acceptance Criteria:**
 - A publication field holding a lone surrogate fails `validatePublication` with a problem that names well-formed Unicode; the configuration reader reports it as a problem (`build` refuses), and a source on the wire has that publication dropped and counted (Task 5's second test asserts the wire case).
+- A publication field holding one of Ruling 13's characters (the bidirectional controls U+202A to U+202E, U+2066 to U+2069, U+200E, U+200F, U+061C; the invisible format characters U+200B, U+2060 to U+2064, U+FEFF, U+00AD, U+180E; the tag characters U+E0000 to U+E007F) fails with a problem that names a control or format character; the joiners U+200C and U+200D pass, as do an emoji sequence and Persian text that use them.
 - `paths()` on a definition whose key holds a lone surrogate reports `count` 1 and `paths` `[]` for the SAID under that key; other pointers of the same definition are unaffected.
 - Every existing test passes; the control-character rule is unchanged.
 
@@ -94,6 +95,15 @@ test("a publication field that is not well-formed Unicode is refused, like a con
   const lone = String.fromCharCode(0xd83d);   // a high surrogate with no low half: not text a browser wallet's store can hold
   assert.match(problems({ ...base, publications: [{ ...pub, name: "a" + lone }] }).join(), /well-formed Unicode/);
   assert.match(problems({ ...base, publications: [{ ...pub, tags: ["ok", lone] }] }).join(), /well-formed/);
+  // Ruling 13: characters that reverse displayed text or do not show are refused like control characters; the joiners stay.
+  const [RLO, ZWSP, SHY, ZWJ, ZWNJ] = [0x202e, 0x200b, 0x00ad, 0x200d, 0x200c].map((c) => String.fromCharCode(c));
+  assert.match(problems({ ...base, publications: [{ ...pub, name: "Front desk at bank.example" + RLO }] }).join(), /control or format character/, "a bidirectional control");
+  assert.match(problems({ ...base, publications: [{ ...pub, collection: "cashier" + ZWSP }] }).join(), /control or format character/, "a zero-width space");
+  assert.match(problems({ ...base, publications: [{ ...pub, description: "Zu" + SHY + "sammen" }] }).join(), /control or format character/, "a soft hyphen");
+  assert.match(problems({ ...base, publications: [{ ...pub, tags: [String.fromCodePoint(0xe0041)] }] }).join(), /control or format character/, "a tag character");
+  const family = String.fromCodePoint(0x1f468) + ZWJ + String.fromCodePoint(0x1f469);
+  const persian = [0x645, 0x6cc].map((c) => String.fromCharCode(c)).join("") + ZWNJ + [0x62e, 0x648, 0x627, 0x647, 0x645].map((c) => String.fromCharCode(c)).join("");
+  assert.deepEqual(problems({ ...base, publications: [{ ...pub, name: "family " + family, description: "Persian: " + persian }] }), [], "the joiners U+200D and U+200C stay: emoji sequences and Persian need them");
   assert.deepEqual(problems({ ...base, publications: [{ ...pub, name: "a\u00e9 \ud83d\ude00" }] }), [], "a paired surrogate and a non-ASCII letter are well-formed");
 });
 ```
@@ -118,7 +128,20 @@ Expected: FAIL: no problem is reported for the lone surrogate; `paths` reports t
 
 - [ ] **Step 3: The rule**
 
-In `src/source.ts`, under the `CONTROL` comment add `// A lone surrogate is not text a browser wallet's store can hold (Ruling 12): refused like a control character.` In `validatePublication`'s `text` helper, after the control-character line: `if (!v.isWellFormed()) return { problem: \`${k} is not well-formed Unicode\` };`. In the tags loop, the condition becomes `typeof t !== "string" || t.length > PUBLICATION.tag || hasControlCharacters(t) || !t.isWellFormed()` and the message `tags[${i}] is not a string of at most ${PUBLICATION.tag} characters of well-formed Unicode without control characters`.
+In `src/source.ts`, replace the `CONTROL` constant and `hasControlCharacters` with:
+
+```ts
+// Refused in a stranger's string, like a control character (Rulings 12 and 13): the C0 and C1 controls, which must not reach a terminal
+// or a page; the bidirectional controls, which reverse displayed text; and the format characters that do not show, which make two
+// names look alike. The joiners U+200C and U+200D stay: emoji sequences and Persian need them.
+const FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]|[\u{e0000}-\u{e007f}]/u;
+
+function hasForbiddenCharacters(s: string): boolean {
+  return FORBIDDEN.test(s);
+}
+```
+
+(write the escapes as shown; the source stays ASCII). In `validatePublication`'s `text` helper the control-character line becomes `if (hasForbiddenCharacters(v)) return { problem: \`${k} holds a control or format character\` };` and after it: `if (!v.isWellFormed()) return { problem: \`${k} is not well-formed Unicode\` };`. In the tags loop, the condition becomes `typeof t !== "string" || t.length > PUBLICATION.tag || hasForbiddenCharacters(t) || !t.isWellFormed()` and the message `tags[${i}] is not a string of at most ${PUBLICATION.tag} characters of well-formed Unicode without control or format characters`. The existing tests that match `/control/` still match.
 
 In `src/scan.ts` `paths()`, the push condition becomes `if (occs[k]!.at >= i && pointer.length <= PATH_LIMITS.maxLength && pointer.isWellFormed() && out.length < PATH_LIMITS.maxPaths) out.push(pointer);` with the comment `// A pointer is text a catalog writes: one whose key is not well-formed Unicode is left out (Ruling 12).`
 
@@ -129,7 +152,7 @@ Expected: all pass.
 
 ```bash
 git add src/source.ts src/scan.ts tests/config.test.ts tests/scan.test.ts
-git commit -m "feat: a stranger's string is well-formed Unicode, in publications and reported paths (<bead id>)"
+git commit -m "feat: a stranger's string is well-formed Unicode and holds no text-reversing or invisible character (<bead id>)"
 ```
 
 ---
