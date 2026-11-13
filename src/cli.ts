@@ -128,7 +128,7 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
     const source = parseSourceAddress(target, { test: options.test });
     if (source !== null) return await verifySource(source.address, io, options);
   }
-  if (target === undefined || said === undefined || !isSaid(said)) return usage(io, "The SAID is required and must match the pattern.");
+  if (target === undefined || said === undefined || !isSaid(said)) return usage(io, said === undefined && target !== undefined && isAddress(target) ? "One address alone must be a source address: https, a DNS name, a path ending in /source.json. A definition's address needs its SAID." : "The SAID is required and must match the pattern.");
   let bytes: Uint8Array;
   let where: { address?: string } = {};
   let browsers: { browserWallets?: string } = {};

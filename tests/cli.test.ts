@@ -410,10 +410,10 @@ test("verify over a source document address: readable as a source exits 0 and re
     c = capture();
     assert.equal(await main(["verify", `${a.origin}/mad/definitions/${SELECTION}.json`], c.io, local), 2);
     assert.equal(c.out(), "");
-    assert.ok(c.err().includes("The SAID is required"));
+    assert.ok(c.err().includes("A definition's address needs its SAID"), "an address alone that is not a source address: the note names both readings");
     c = capture();
     assert.equal(await main(["verify", join(fixtures, "compact", `${QVI}.json`)], c.io, local), 2);
-    assert.ok(c.err().includes("The SAID is required"));
+    assert.ok(c.err().includes("The SAID is required"), "a file alone: the SAID is missing");
     assert.equal(a.requests.length, requests, "usage errors fetch nothing");
   } finally { a.behave = null; await a.close(); }
 });

@@ -58,7 +58,7 @@ aws cloudfront update-distribution --id <id> --cli-input-yaml file://dist-config
 
 Steps checked against the AWS CloudFront Developer Guide on 2026-11-12. Afterwards `verify` over a definition's address reports that browser wallets can read the file: it asks with an `Origin` header, as a browser does, and SimpleCORS adds the header only to such a request, so a plain `curl -I` without one does not show it.
 
-The check for the source document itself exits 0 when the document reads as a source and reports `browserWallets`:
+The check for the source document itself exits 0 when the document reads as a source, and reports `browserWallets` either way:
 
 ```bash
 node bin/mad-discovery.ts verify https://mad.seriouscoder.one/source.json
