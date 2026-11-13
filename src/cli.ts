@@ -10,6 +10,7 @@ import { walk } from "./walk.ts";
 import { get } from "./get.ts";
 import { redirectTarget } from "./read.ts";
 import type { Resolve } from "./fetch.ts";
+import { asciiJson } from "./json.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
 /** test, resolve and limits exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
@@ -23,11 +24,6 @@ const USAGE = `usage:
   mad-discovery who <SAID> --from <source address>
   mad-discovery get <SAID> --from <source address> --out <folder>
 Every command prints JSON on standard output. Exit 0: success. 1: failure. 2: usage.`;
-
-/** JSON with every character outside printable ASCII as a \\u escape, so a stranger's string cannot reach a terminal raw. */
-export function asciiJson(value: unknown): string {
-  return JSON.stringify(value, null, 2).replace(/[\u007f-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
-}
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -101,7 +97,7 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
     const address = parseHttpsAddress(target, { test: options.test });
     if (address === null) { io.out(asciiJson({ verified: false, expected: said, address: target, reason: "refused-address" }) + "\n"); return 1; }
     // Asked as a browser would, with an Origin header: a host may send Access-Control-Allow-Origin only to such a request.
-    const f = await session(options).fetch(address, true);
+    const f = await session(options).fetch(address, { asBrowser: true });
     if (f.outcome !== "ok") { io.out(asciiJson({ verified: false, expected: said, address, reason: f.outcome, ...redirectTarget(f) }) + "\n"); return 1; }
     bytes = f.bytes;
     where = { address };

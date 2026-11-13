@@ -5,7 +5,8 @@ import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { asciiJson, main, type Io } from "../src/cli.ts";
+import { main, type Io } from "../src/cli.ts";
+import { asciiJson } from "../src/json.ts";
 import { readInputs } from "../src/inputs.ts";
 import { saidOf } from "../src/said.ts";
 import { WALK } from "../src/limits.ts";

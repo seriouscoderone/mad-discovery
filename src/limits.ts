@@ -1,6 +1,6 @@
 /** Every limit of docs/design.md, in one place. The numbers are the design's proposals; the rows are what must exist. */
 
-/** One run's limits: the walk's and get's column of the table in "Fetching safely". The catalog build's column arrives with the second epic. */
+/** One run's limits: a column of the table in "Fetching safely": WALK is the walk's and get's, CATALOG the catalog build's. */
 export type Limits = {
   requestMs: number;              // one request, from before name resolution to the last byte
   fileBytes: number;              // one fetched file
@@ -29,6 +29,28 @@ export const WALK: Limits = {
   hostsInFlight: 8,
   runMs: 120_000,
 };
+
+/** The catalog build's column of the table. No clock for the whole run: its length is bounded by the other rows. */
+export const CATALOG: Limits = {
+  requestMs: 10_000,
+  fileBytes: FILE_BYTES,
+  definitionsPerSource: 500,
+  introductionsPerSource: 10,
+  introductionDepth: 3,
+  sourcesPerRun: 1_000,
+  hostMs: 120_000,
+  hostBytes: 100_000_000,
+  hostsInFlight: 8,
+  runMs: null,
+};
+
+/** What one source may add to a catalog row, and how large a row may be: a reader fetches a row as one file. */
+export type RowLimits = { referrersPerSource: number; rowBytes: number };
+export const ROW: RowLimits = { referrersPerSource: 50, rowBytes: FILE_BYTES };
+
+/** How many contained SAIDs a catalog build records, with their paths, from one definition and from one source: what it keeps in memory is bounded, not only what it fetches. The rest are counted. */
+export type ContainedLimits = { perDefinition: number; perSource: number };
+export const CONTAINED: ContainedLimits = { perDefinition: 200, perSource: 5_000 };
 
 /** JSON Pointer paths reported for one definition, and the nesting depth beyond which nothing is parsed. */
 export const PATH_LIMITS = { maxPaths: 16, maxLength: 256, maxDepth: 64 } as const;

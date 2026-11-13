@@ -19,16 +19,20 @@ export type Outcome = "ok" | "truncated" | "not-found" | "unreachable" | "timed-
 export type Fetched =
   | { outcome: "ok"; bytes: Uint8Array; anyOrigin: boolean; read: number; ms: number }
   | { outcome: "redirected"; target: string | null; read: number; ms: number }
-  | { outcome: "not-found" | "unreachable" | "timed-out" | "refused-address" | "invalid"; read: number; ms: number };
+  | { outcome: "not-found" | "unreachable" | "timed-out" | "refused-address" | "invalid"; status?: number; read: number; ms: number };
 
 /** Every address a name resolves to, IPv4 and IPv6 together; rejects when there is none or no answer in time. */
 export type Resolve = (hostname: string, timeoutMs: number) => Promise<string[]>;
+
+/** What an answer must be: application/json or +json, or text/plain (a robots.txt). */
+export type FetchType = "json" | "text";
 
 export type FetchOptions = AddressOptions & {
   timeoutMs: number;   // from before name resolution to the last byte
   maxBytes: number;    // a longer body is refused while it is read
   resolve?: Resolve;   // tests inject one; the default is resolveNames
   now?: () => number;  // tests inject a clock
+  type?: FetchType;    // what the answer must be: application/json or +json (the default), or text/plain for a robots.txt
   asBrowser?: boolean; // verify's question about browser wallets: also send Origin: BROWSER_ORIGIN; changes nothing else
 };
 
@@ -49,10 +53,10 @@ const resolveNames: Resolve = async (hostname, timeoutMs) => {
 const httpsAgent = new https.Agent({ keepAlive: false });
 const httpAgent = new http.Agent({ keepAlive: false });
 
-function isJsonType(header: string | undefined): boolean {
+function acceptable(header: string | undefined, type: FetchType): boolean {
   if (header === undefined) return false;
-  const type = header.split(";")[0]!.trim().toLowerCase();
-  return type === "application/json" || type.endsWith("+json");
+  const media = header.split(";")[0]!.trim().toLowerCase();
+  return type === "text" ? media === "text/plain" : media === "application/json" || media.endsWith("+json");
 }
 
 function isTimeout(e: unknown): boolean {
@@ -64,16 +68,17 @@ function isTimeout(e: unknown): boolean {
 type Ending =
   | { outcome: "ok"; bytes: Uint8Array; anyOrigin: boolean }
   | { outcome: "redirected"; target: string | null }
-  | { outcome: "not-found" | "unreachable" | "timed-out" | "refused-address" | "invalid" };
+  | { outcome: "not-found" | "unreachable" | "timed-out" | "refused-address" | "invalid"; status?: number };
 
 /**
- * The one fetch routine of docs/design.md "Fetching safely". The address rule first; then the name is resolved once and every
+ * The one fetch routine of docs/design.md "Fetching safely", for a JSON file or, for a robots.txt, a text/plain one. The address rule first; then the name is resolved once and every
  * answer checked; then the socket is told the one address it may connect to; no redirect is followed, no encoding accepted,
  * and the body is cut at maxBytes while it arrives. One deadline covers all of it.
  */
 export function fetchJson(address: string, opts: FetchOptions): Promise<Fetched> {
   const now = opts.now ?? (() => performance.now());
   const start = now();
+  const type = opts.type ?? "json";
   let read = 0;
   return new Promise<Fetched>((done) => {
     let settled = false;
@@ -124,7 +129,7 @@ export function fetchJson(address: string, opts: FetchOptions): Promise<Fetched>
         agent: secure ? httpsAgent : httpAgent,
         lookup,
         rejectUnauthorized: true,
-        headers: { accept: "application/json", "accept-encoding": "identity", "user-agent": USER_AGENT, ...(opts.asBrowser === true ? { origin: BROWSER_ORIGIN } : {}) },
+        headers: { accept: type === "text" ? "text/plain" : "application/json", "accept-encoding": "identity", "user-agent": USER_AGENT, ...(opts.asBrowser === true ? { origin: BROWSER_ORIGIN } : {}) },
       };
       const onResponse = (res: http.IncomingMessage): void => {
         const status = res.statusCode ?? 0;
@@ -133,12 +138,12 @@ export function fetchJson(address: string, opts: FetchOptions): Promise<Fetched>
           finish({ outcome: "redirected", target: typeof location === "string" ? location.slice(0, 512) : null });
           return;
         }
-        if (status === 404 || status === 410) { finish({ outcome: "not-found" }); return; }
-        if (status >= 500) { finish({ outcome: "unreachable" }); return; }
-        if (status !== 200) { finish({ outcome: "invalid" }); return; }
+        if (status === 404 || status === 410) { finish({ outcome: "not-found", status }); return; }
+        if (status >= 500) { finish({ outcome: "unreachable", status }); return; }
+        if (status !== 200) { finish({ outcome: "invalid", status }); return; }
         const encoding = res.headers["content-encoding"];
-        if (encoding !== undefined && encoding.toLowerCase() !== "identity") { finish({ outcome: "invalid" }); return; }
-        if (!isJsonType(res.headers["content-type"])) { finish({ outcome: "invalid" }); return; }
+        if (encoding !== undefined && encoding.toLowerCase() !== "identity") { finish({ outcome: "invalid", status }); return; }
+        if (!acceptable(res.headers["content-type"], type)) { finish({ outcome: "invalid", status }); return; }
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => {
           read += chunk.length;

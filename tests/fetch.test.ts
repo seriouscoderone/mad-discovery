@@ -232,3 +232,26 @@ test("a certificate no authority signed is unreachable, and the environment cann
     assert.equal((await run("routine")).outcome, "unreachable", "the routine's explicit rejectUnauthorized: true wins over the variable");
   } finally { await secure.close(); }
 });
+
+test("the text mode accepts text/plain and nothing else; the json mode is unchanged", async () => {
+  for (const [type, mode, expected] of [["text/plain", "text", "ok"], ["Text/Plain; charset=utf-8", "text", "ok"], ["application/json", "text", "invalid"], ["text/html", "text", "invalid"], ["text/plain", "json", "invalid"], ["application/json", "json", "ok"]] as const) {
+    let accept: string | string[] | undefined;
+    origin.behave = (req, res) => { accept = req.headers.accept; res.setHeader("content-type", type); res.end(mode === "text" ? "User-agent: *\n" : "{}"); return true; };
+    const r = await fetchLocal("x.json", { type: mode });
+    assert.equal(r.outcome, expected, `${type} as ${mode}`);
+    assert.equal(accept, mode === "text" ? "text/plain" : "application/json");
+  }
+  origin.behave = null;
+});
+
+test("a non-ok ending names the status it saw: the answer's for a 4xx, 200 for a wrong content type", async () => {
+  origin.behave = (_req, res) => { res.statusCode = 403; res.end(); return true; };
+  const forbidden = await fetchLocal("x.json");
+  assert.equal(forbidden.outcome, "invalid");
+  if (forbidden.outcome === "invalid") assert.equal(forbidden.status, 403);
+  origin.behave = (_req, res) => { res.setHeader("content-type", "text/html"); res.end("<p>"); return true; };
+  const wrong = await fetchLocal("x.json");
+  assert.equal(wrong.outcome, "invalid");
+  if (wrong.outcome === "invalid") assert.equal(wrong.status, 200);
+  origin.behave = null;
+});

@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { Session } from "../src/session.ts";
-import { WALK, type Limits } from "../src/limits.ts";
+import { WALK, CATALOG, ROW, CONTAINED, type Limits } from "../src/limits.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const origin = await Origin.start();
@@ -159,4 +159,25 @@ test("asking whether a host is used up records nothing about it", () => {
   const s = new Session(limits({}), { test: true });
   assert.equal(s.exhausted("never.example"), null);
   assert.equal((s as unknown as { hosts: Map<string, unknown> }).hosts.size, 0);
+});
+
+test("fetch takes its modes in one object: the text mode passes through and is charged like any request; asBrowser adds Origin", async () => {
+  let sawOrigin: string | undefined;
+  origin.behave = (req, res) => { sawOrigin = req.headers.origin; if (req.url === "/robots.txt") { res.setHeader("content-type", "text/plain"); res.end("User-agent: *\nDisallow:\n"); return true; } return false; };
+  try {
+    const s = new Session(limits({}), { test: true });
+    const r = await s.fetch(url("robots.txt"), { type: "text" });
+    assert.equal(r.outcome, "ok");
+    if (r.outcome === "ok") assert.equal(new TextDecoder().decode(r.bytes), "User-agent: *\nDisallow:\n");
+    assert.equal(sawOrigin, undefined, "no Origin unless asked");
+    assert.equal((await s.fetch(url("robots.txt"))).outcome, "invalid", "as json, text/plain is refused");
+    assert.equal((await s.fetch(url("x.json"), { asBrowser: true })).outcome, "ok");
+    assert.equal(sawOrigin, "https://wallet.invalid");
+  } finally { origin.behave = null; }
+});
+
+test("the catalog's limits are the design's column", () => {
+  assert.deepEqual(CATALOG, { requestMs: 10_000, fileBytes: 1_000_000, definitionsPerSource: 500, introductionsPerSource: 10, introductionDepth: 3, sourcesPerRun: 1_000, hostMs: 120_000, hostBytes: 100_000_000, hostsInFlight: 8, runMs: null });
+  assert.deepEqual(ROW, { referrersPerSource: 50, rowBytes: 1_000_000 });
+  assert.deepEqual(CONTAINED, { perDefinition: 200, perSource: 5_000 });
 });
