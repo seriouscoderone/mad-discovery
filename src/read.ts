@@ -11,7 +11,7 @@ export type Reason = Outcome | "failed-check" | "not-contained" | "not-there";
 export type Unresolved = { address: string; via: string[]; reason: Reason; said?: string; limit?: string; target?: string };
 
 export type ReadSource =
-  | { ok: true; document: SourceDocument; base: string; dropped: Dropped }
+  | { ok: true; document: SourceDocument; base: string; dropped: Dropped; bytes: Uint8Array }
   | { ok: false; unresolved: Unresolved };
 
 /** The redirect's target as a member to spread into an entry, when the answer named one. */
@@ -27,5 +27,5 @@ export async function readSource(address: string, via: string[], session: Sessio
   if (f.outcome !== "ok") return { ok: false, unresolved: { address, via, reason: f.outcome, ...redirectTarget(f) } };
   const d = readSourceDocument(f.bytes, address, { test: session.test });
   if (!d.ok) return { ok: false, unresolved: { address, via, reason: "invalid" } };
-  return { ok: true, document: d.document, base: parsed.base, dropped: d.dropped };
+  return { ok: true, document: d.document, base: parsed.base, dropped: d.dropped, bytes: f.bytes };
 }
