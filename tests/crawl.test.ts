@@ -35,6 +35,8 @@ test("an extra list joins the named round-robin under its key", () => {
   const extra = [{ key: "https://a.example/catalog.json", candidates: ["https://c1.example/source.json", "https://c2.example/source.json"].map((address) => ({ address, via: ["https://a.example/catalog.json"], named: true })) }];
   const next = nextLevel(() => false, here, new Set(), extra);
   assert.deepEqual(next.map((c) => c.address.slice(8, 10)), ["c1", "c2", "b1"], "the named extra list first, then the unnamed introductions");
+  const interleaved = nextLevel(() => true, here, new Set(), extra);
+  assert.deepEqual(interleaved.map((c) => c.address.slice(8, 10)), ["c1", "b1", "c2"], "a named introduction and the extra list round-robin by key: the catalog's key sorts before b's address");
 });
 
 test("levels visits two starts at depth 0, follows their introductions, and applies the room counting the starts", async () => {

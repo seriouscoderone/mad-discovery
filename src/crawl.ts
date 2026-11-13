@@ -65,11 +65,13 @@ export async function levels<V extends Node>(
   named: (i: Introduction) => boolean,
   extra: (depth: number, here: V[]) => Extra[] | Promise<Extra[]> = () => [],
 ): Promise<{ visits: V[]; skipped: Unresolved[] }> {
-  const visited = new Set<string>(starts.map((c) => c.address));
-  let taken = starts.length;
+  // A repeated start is one visit. Whether the starts fit the room is the caller's to settle before calling: a catalog build refuses when they do not.
+  const unique = starts.filter((c, i) => starts.findIndex((d) => d.address === c.address) === i);
+  const visited = new Set<string>(unique.map((c) => c.address));
+  let taken = unique.length;
   const visits: V[] = [];
   const skipped: Unresolved[] = [];
-  let level: Candidate[] = starts;
+  let level: Candidate[] = unique;
   for (let depth = 0; level.length > 0; depth++) {
     const here: V[] = [];
     await session.each(level, (c) => Session.hostOf(c.address), async (c) => { here.push(await visit(c, depth)); });
