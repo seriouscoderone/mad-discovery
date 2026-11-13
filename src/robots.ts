@@ -6,6 +6,7 @@ export type RobotsRules = { groups: { agents: string[]; rules: { allow: boolean;
 
 const MAX_RULE = 512;    // a longer rule path is ignored
 const MAX_RULES = 1000;  // per group, and for the groups combined for one product
+const MAX_RULE_CHARS = 16384;  // the rules' raw lengths summed, per group and combined: rules past it are ignored in file order
 
 /**
  * A robots.txt, read as RFC 9309 says: groups of User-agent lines followed by rules; text after # dropped; unknown lines ignored.
@@ -15,6 +16,7 @@ export function parseRobots(text: string): RobotsRules {
   const groups: RobotsRules["groups"] = [];
   let current: RobotsRules["groups"][number] | null = null;
   let collectingAgents = false;
+  let chars = 0;   // the current group's rule characters; past MAX_RULE_CHARS, the group takes no more rules
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/#.*$/, "").trim();
     if (line === "") continue;
@@ -23,12 +25,14 @@ export function parseRobots(text: string): RobotsRules {
     const field = line.slice(0, colon).trim().toLowerCase();
     const value = line.slice(colon + 1).trim();
     if (field === "user-agent") {
-      if (!collectingAgents || current === null) { current = { agents: [], rules: [] }; groups.push(current); collectingAgents = true; }
+      if (!collectingAgents || current === null) { current = { agents: [], rules: [] }; groups.push(current); collectingAgents = true; chars = 0; }
       current.agents.push(value.toLowerCase());
     } else if ((field === "allow" || field === "disallow") && current !== null) {
       collectingAgents = false;
       if (value === "") continue;      // an empty Disallow allows everything; an empty Allow says nothing
-      if (value.length > MAX_RULE || current.rules.length >= MAX_RULES) continue;
+      if (value.length > MAX_RULE || current.rules.length >= MAX_RULES || chars > MAX_RULE_CHARS) continue;
+      chars += value.length;
+      if (chars > MAX_RULE_CHARS) continue;
       current.rules.push({ allow: field === "allow", path: normalizePath(value), length: value.length });
     } else collectingAgents = false;
   }
@@ -42,21 +46,23 @@ function productToken(agent: string): string {
 
 /**
  * RFC 9309 path matching without a regular expression: * matches any run, $ anchors the end, the pattern is a prefix otherwise.
- * The two-pointer glob walk is linear in the path for each star, so a stranger's rule cannot make it backtrack.
+ * The rule is cut at its stars and each piece is found once, leftmost, after the one before it: no backtracking, so a
+ * stranger's rule costs a scan of the path per piece. A * in the rule is always the wildcard, even where the path holds one.
  */
 function matches(pattern: string, path: string): boolean {
   const anchored = pattern.endsWith("$");
-  const p = anchored ? pattern.slice(0, -1) : pattern;
-  let i = 0, j = 0, star = -1, mark = 0;
-  while (i < path.length) {
-    if (j < p.length && p[j] === "*") { star = j++; mark = i; }   // before the literal test: a * in the rule is always the wildcard
-    else if (j < p.length && p[j] === path[i]) { i++; j++; }
-    else if (!anchored && j === p.length) return true;   // the pattern is consumed and is a prefix of the path
-    else if (star >= 0) { j = star + 1; i = ++mark; }
-    else return false;
+  const pieces = (anchored ? pattern.slice(0, -1) : pattern).split("*");
+  const first = pieces[0]!;
+  if (pieces.length === 1) return anchored ? path === first : path.startsWith(first);
+  if (!path.startsWith(first)) return false;
+  let at = first.length;
+  for (let k = 1; k < pieces.length - 1; k++) {
+    const found = path.indexOf(pieces[k]!, at);
+    if (found < 0) return false;
+    at = found + pieces[k]!.length;
   }
-  while (j < p.length && p[j] === "*") j++;
-  return j === p.length;                                 // the path is consumed: the pattern must be too
+  const last = pieces[pieces.length - 1]!;
+  return anchored ? path.length - last.length >= at && path.endsWith(last) : path.indexOf(last, at) >= 0;
 }
 
 /** Each UTF-8 byte of a code point above US-ASCII, as an upper-case %XX. */
@@ -76,14 +82,20 @@ function normalizePath(s: string): string {
 
 /**
  * Whether the rules allow this path for this product: the product's groups, else the * groups, else yes, every matching group's
- * rules combined into one (RFC 9309 2.2.1, capped at 1,000 rules); longest match wins, Allow a tie.
+ * rules combined into one (RFC 9309 2.2.1, capped at 1,000 rules and 16,384 characters); longest match wins, Allow a tie.
  */
 export function allows(rules: RobotsRules, product: string, path: string): boolean {
   const token = productToken(product);
   let groups = rules.groups.filter((g) => g.agents.some((a) => productToken(a) === token));
   if (groups.length === 0) groups = rules.groups.filter((g) => g.agents.includes("*"));
   if (groups.length === 0) return true;
-  const combined = groups.flatMap((g) => g.rules).slice(0, MAX_RULES);
+  const combined: RobotsRules["groups"][number]["rules"] = [];
+  let chars = 0;
+  for (const rule of groups.flatMap((g) => g.rules)) {
+    if (combined.length >= MAX_RULES || chars + rule.length > MAX_RULE_CHARS) break;
+    chars += rule.length;
+    combined.push(rule);
+  }
   const target = normalizePath(path);
   let best: { allow: boolean; length: number } | null = null;
   for (const rule of combined) {

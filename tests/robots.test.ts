@@ -57,19 +57,61 @@ test("a hostile rule cannot stall the matcher, and oversize rules and groups are
   assert.equal(allows(many, "mad-discovery", "/p0999"), false);
 });
 
+test("rules beyond 16,384 characters in a group, or in the groups combined, are ignored in file order", () => {
+  // Each rule is 500 characters: the 33rd brings the total to 16,500.
+  const rule = (i: number) => `/p${String(i).padStart(2, "0")}` + "x".repeat(496);
+  const lines = (from: number, to: number) => Array.from({ length: to - from }, (_, k) => `Disallow: ${rule(from + k)}\n`).join("");
+  const one = parseRobots("User-agent: *\n" + lines(0, 40));
+  assert.equal(one.groups[0]!.rules.length, 32);
+  assert.equal(allows(one, "mad-discovery", rule(31)), false);
+  assert.equal(allows(one, "mad-discovery", rule(32)), true, "the rule that passes the cap is ignored");
+  assert.equal(allows(one, "mad-discovery", rule(39)), true, "and every rule after it");
+  const two = parseRobots("User-agent: *\n" + lines(0, 20) + "\nUser-agent: *\n" + lines(20, 40));
+  assert.equal(allows(two, "mad-discovery", rule(31)), false);
+  assert.equal(allows(two, "mad-discovery", rule(32)), true, "the combined group is capped too");
+});
+
+/** A seeded generator (mulberry32), so the differential check is the same on every run. */
+function seeded(seed: number): () => number {
+  return () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+/** The RFC 9309 meaning of a rule, as a RegExp over the test's own generated pattern: * is any run, a final $ anchors, any other character is itself. */
+function reference(pattern: string, path: string): boolean {
+  const anchored = pattern.endsWith("$");
+  const body = anchored ? pattern.slice(0, -1) : pattern;
+  const source = "^" + body.split("*").map((part) => part.replace(/[$/]/g, "\\$&")).join("[^]*") + (anchored ? "$" : "");
+  return new RegExp(source).test(path);
+}
+
+test("the matcher agrees with a RegExp reference over random rules and paths", () => {
+  const random = seeded(9309);
+  const pick = (alphabet: string, min: number, max: number) => { const n = min + Math.floor(random() * (max - min + 1)); let s = ""; for (let i = 0; i < n; i++) s += alphabet[Math.floor(random() * alphabet.length)]; return s; };
+  const disagreements: string[] = [];
+  for (let k = 0; k < 500; k++) {
+    const pattern = "/" + pick("ab/*$", 0, 7);
+    const path = "/" + pick("ab/*$", 0, 9);
+    const matched = !allows(parseRobots(`User-agent: *\nDisallow: ${pattern}\n`), "mad-discovery", path);
+    if (matched !== reference(pattern, path)) disagreements.push(`${pattern} ${path}`);
+  }
+  assert.deepEqual(disagreements, []);
+});
+
 test("the address judged is bounded by the address rule: the worst case at the cap is fast, and a refused address asks nothing", async () => {
   const s = new Session({ ...WALK, requestMs: 5000 }, { test: true });
   const o = await Origin.start();
   try {
-    const rule = "/*" + "a".repeat(508) + "b";
+    // A rule about half the path's length is the worst case for a backtracking glob.
+    const rule = "/*" + "a".repeat(255) + "b";
     o.behave = (req, res) => { if (req.url === "/robots.txt") { res.setHeader("content-type", "text/plain"); res.end("User-agent: *\n" + `Disallow: ${rule}\n`.repeat(1000)); return true; } return false; };
     const robots = new Robots(s);
+    assert.equal(await robots.allows(`${o.origin}/mad/source.json`), true, "the file is read once, before the timing");
     const atCap = `${o.origin}/` + "a".repeat(512 - o.origin.length - 1);
     assert.equal(atCap.length, 512);
     const t0 = performance.now();
     assert.equal(await robots.allows(atCap), true);
     const took = performance.now() - t0;
-    assert.ok(took < 2000, `took ${took} ms`);
+    assert.ok(took < 5, `took ${took} ms`);
     const asked = o.requests.length;
     assert.equal(await robots.allows(atCap + "a"), "refused-address", "over 512 characters");
     assert.equal(await robots.allows("not an address"), "refused-address");
