@@ -75,6 +75,9 @@ test("every string on a page is a stranger's", () => {
     }
   }
   const page = files.get(`pages/${said}/index.html`)!;
+  const outbound = [...page.matchAll(/<a href="https:[^"]*"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(outbound.some((tag) => tag.includes('href="https://y.example/mad/source.json"')), "the introduction's address is a link");
+  for (const tag of outbound) assert.ok(tag.includes(' rel="noopener noreferrer"'), tag);
   assert.ok(page.includes("Introductions"), "a fixed label");
   assert.ok(page.includes(escapeHtml(hostile[0]!)));
 });

@@ -10,6 +10,7 @@ import { Session } from "../src/session.ts";
 import { Robots } from "../src/robots.ts";
 import { CATALOG, ROW, CONTAINED, PATH_LIMITS, PUBLICATION, type Limits, type RowLimits } from "../src/limits.ts";
 import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile, type Row } from "../src/catalog.ts";
+import { SEEDED_NOTE } from "../src/catalogpages.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const { inputs } = readInputs(fileURLToPath(new URL("../fixtures/compact/", import.meta.url)));
@@ -28,6 +29,8 @@ const definition = (inner: string[], filler = ""): { said: string; bytes: Uint8A
   const said = saidOf(new TextEncoder().encode(shape(Buffer.from(FILL).toString("ascii"))));
   return { said, bytes: new TextEncoder().encode(shape(said)) };
 };
+/** Every JSON file the build composes is ASCII-only; the copied candidate files are the bytes read, and pages are UTF-8 by design. */
+const assertAsciiJson = (files: Map<string, Uint8Array>) => { for (const path of files.keys()) if (path.endsWith(".json") && !path.startsWith("candidates/")) assert.ok(/^[\x20-\x7e\n]*$/.test(text(files, path)), `${path} is ASCII-only`); };
 const bySource = <T extends { source: string }>(xs: T[]) => [...xs].sort((p, q) => (p.source < q.source ? -1 : 1));
 
 test("two sources that never link, named with --from, meet in one row; two builds are byte-identical", async () => {
@@ -51,7 +54,8 @@ test("two sources that never link, named with --from, meet in one row; two build
   const meta = json(r.files, "catalog.json") as Record<string, unknown>;
   assert.deepEqual(meta["from"], [aAddr, bAddr].sort());
   assert.equal(meta["seeded"], true);
-  assert.equal(typeof meta["note"], "string");
+  assert.equal(meta["note"], SEEDED_NOTE, "one sentence for the seeded catalog, on the index page and here");
+  assertAsciiJson(r.files);
   assert.deepEqual(meta["tool"], { commit: "0123456789abcdef0123456789abcdef01234567" });
   assert.deepEqual(meta["limits"], { ...CATALOG, requestMs: 2000, paths: PATH_LIMITS, publication: PUBLICATION, row: ROW, contained: CONTAINED });
   assert.deepEqual(meta["candidates"], []);
@@ -161,15 +165,22 @@ test("candidate files: read, copied into the output, de-duplicated with --from, 
   assert.equal(meta["seeded"], false); assert.equal(meta["note"], undefined);
   assert.deepEqual(meta["candidates"], [{ finder: "robots", snapshot: "CC-MAIN-2026-43", count: 4, path: "candidates/robots/CC-MAIN-2026-43.json" }]);
   assert.equal(meta["droppedCandidates"], 2);
+  assertAsciiJson(r.files);
   assert.equal(text(r.files, "candidates/robots/CC-MAIN-2026-43.json"), JSON.stringify(file), "copied byte for byte");
   const sources = json(r.files, "sources.json") as { sources: { address: string; found: unknown[] }[] };
   assert.deepEqual(sources.sources.map((s) => s.address), [aAddr, bAddr].sort());
   assert.deepEqual(sources.sources.find((s) => s.address === aAddr)!.found, [{ by: "from" }, { by: "finder", finder: "robots", snapshot: "CC-MAIN-2026-43", place: { file: "y.warc.gz", offset: 7 } }]);
+  const asked = a.requests.length + b.requests.length;
   assert.deepEqual(await build([aAddr], {}, ROW, [file, { ...file, finder: "Robots" }]), { ok: false, problem: "two candidate files would both be written as candidates/Robots/CC-MAIN-2026-43.json" }, "one path per file, on a case-insensitive file system too");
+  assert.equal(a.requests.length + b.requests.length, asked, "the colliding build fetched nothing");
   const twice = await build([aAddr, aAddr], {}, ROW, [{ ...file, candidates: [file.candidates[1]!, file.candidates[1]!] }]);
   assert.ok(twice.ok); if (!twice.ok) return;
   assert.deepEqual((json(twice.files, "sources.json") as { sources: { address: string; found: unknown[] }[] }).sources.find((s) => s.address === aAddr)!.found, [{ by: "from" }, { by: "finder", finder: "robots", snapshot: "CC-MAIN-2026-43", place: { file: "y.warc.gz", offset: 7 } }], "the same way twice is recorded once");
   assert.deepEqual((json(twice.files, "catalog.json") as { from: string[] }).from, [aAddr]);
+  const reordered = readCandidateFile(JSON.stringify({ finder: "robots", snapshot: "s2", candidates: [{ address: aAddr, place: { file: "y.warc.gz", offset: 7 } }, { address: aAddr, place: { offset: 7, file: "y.warc.gz" } }] }))!;
+  const once = await build([], {}, ROW, [reordered]);
+  assert.ok(once.ok); if (!once.ok) return;
+  assert.equal(JSON.stringify((json(once.files, "sources.json") as { sources: { address: string; found: unknown[] }[] }).sources.find((s) => s.address === aAddr)!.found), JSON.stringify([{ by: "finder", finder: "robots", snapshot: "s2", place: { file: "y.warc.gz", offset: 7 } }]), "one place with its keys in two orders is recorded once, keys sorted");
   const fetches = () => a.requests.filter((p) => p === "mad/source.json").length;
   const before = fetches();   // r and twice each fetched a's document once
   const tooMany = await build([aAddr, bAddr], { sourcesPerRun: 1 });
@@ -213,6 +224,19 @@ test("the tool's commit comes from the checkout, or is null", () => {
   const tree2 = mkdtempSync(join(tmpdir(), "worktree2-"));
   writeFileSync(join(tree2, ".git"), `gitdir: ${join(dir, ".git", "worktrees", "w")}\n`);
   assert.equal(toolCommit(pathToFileURL(tree2 + "/")), "fedcbafedcbafedcbafedcbafedcbafedcbafedc", "a worktree's refs are read from its commondir");
+  // A repository folder whose name holds a # (or % or ?): gitdir and commondir are file paths, not URL references.
+  const hashed = mkdtempSync(join(tmpdir(), "git#-"));
+  mkdirSync(join(hashed, ".git", "refs", "heads"), { recursive: true });
+  writeFileSync(join(hashed, ".git", "HEAD"), "ref: refs/heads/main\n");
+  writeFileSync(join(hashed, ".git", "refs", "heads", "main"), "1111111111111111111111111111111111111111\n");
+  mkdirSync(join(hashed, ".git", "worktrees", "w"), { recursive: true });
+  writeFileSync(join(hashed, ".git", "worktrees", "w", "HEAD"), "ref: refs/heads/main\n");
+  writeFileSync(join(hashed, ".git", "worktrees", "w", "commondir"), join(hashed, ".git") + "\n");
+  const tree3 = mkdtempSync(join(tmpdir(), "worktree3-"));
+  writeFileSync(join(tree3, ".git"), `gitdir: ${join(hashed, ".git")}\n`);
+  assert.equal(toolCommit(pathToFileURL(tree3 + "/")), "1111111111111111111111111111111111111111", "a gitdir path holding #");
+  writeFileSync(join(tree3, ".git"), `gitdir: ${join(hashed, ".git", "worktrees", "w")}\n`);
+  assert.equal(toolCommit(pathToFileURL(tree3 + "/")), "1111111111111111111111111111111111111111", "an absolute commondir holding #");
   assert.equal(toolCommit(pathToFileURL(mkdtempSync(join(tmpdir(), "nogit-")) + "/")), null);
   assert.match(toolCommit(new URL("../", import.meta.url))!, /^[0-9a-f]{40}$/, "this checkout");
 });

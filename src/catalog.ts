@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { isSaid } from "./said.ts";
 import { parseSourceAddress } from "./address.ts";
 import { levels, type Candidate } from "./crawl.ts";
@@ -6,7 +8,7 @@ import { visitAll } from "./visit.ts";
 import { byKey, isRecord, type Publication } from "./source.ts";
 import { asciiJson } from "./json.ts";
 import { PATH_LIMITS, PUBLICATION, type RowLimits, type ContainedLimits } from "./limits.ts";
-import { catalogPages, type SourcePages } from "./catalogpages.ts";
+import { catalogPages, SEEDED_NOTE, type SourcePages } from "./catalogpages.ts";
 import type { Session } from "./session.ts";
 import type { Robots } from "./robots.ts";
 
@@ -32,7 +34,6 @@ export type BuildOutcome =
   | { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } }
   | { ok: false; problem: string };
 
-const SEEDED_NOTE = "A seeded crawl: the sources are a hand-kept list given on the command line, which Ruling 3 does not count as meeting the objective for strangers. A catalog that does is built from a finder's candidate files.";
 const NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/;   // a finder or snapshot name: it becomes a path, so no leading dot (".", "..", a hidden file)
 const PLACE_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 
@@ -50,8 +51,8 @@ export function readCandidateFile(text: string): CandidateFile | null {
   const candidates: CandidateFile["candidates"] = [];
   for (const c of raw["candidates"]) {
     if (!isRecord(c) || typeof c["address"] !== "string" || (c["place"] !== undefined && !isRecord(c["place"]))) return null;
-    const place: Record<string, string | number> = {};
-    if (isRecord(c["place"])) for (const [k, v] of Object.entries(c["place"])) if (PLACE_KEY.test(k) && ((typeof v === "string" && v.isWellFormed()) || typeof v === "number")) place[k] = v;   // Ruling 12: an ill-formed string is dropped
+    const place: Record<string, string | number> = {};   // keys sorted: the same place written in another order is the same found entry
+    if (isRecord(c["place"])) for (const [k, v] of Object.entries(c["place"]).sort(([p], [q]) => compare(p, q))) if (PLACE_KEY.test(k) && ((typeof v === "string" && v.isWellFormed()) || typeof v === "number")) place[k] = v;   // Ruling 12: an ill-formed string is dropped
     candidates.push({ address: c["address"], place });
   }
   return { finder: raw["finder"], snapshot: raw["snapshot"], candidates };
@@ -60,11 +61,13 @@ export function readCandidateFile(text: string): CandidateFile | null {
 /** The commit the tool runs from: .git/HEAD (or the folder a worktree's .git file names), through the ref it names, loose or packed. null when this is not a checkout. */
 export function toolCommit(checkout: URL): string | null {
   const read = (url: URL): string | null => { try { return readFileSync(url, "utf8"); } catch { return null; } };
+  // gitdir and commondir hold file paths, absolute or relative to their folder; a path may hold %, # or ?, so it is never a URL reference.
+  const folder = (path: string, base: URL): URL => pathToFileURL(resolve(fileURLToPath(base), path.trim()) + "/");
   let git = new URL(".git/", checkout);
   const file = read(new URL(".git", checkout));
-  if (file !== null && file.startsWith("gitdir: ")) git = new URL(file.slice(8).trim().replace(/\/?$/, "/"), checkout);
+  if (file !== null && file.startsWith("gitdir: ")) git = folder(file.slice(8), checkout);
   const common = read(new URL("commondir", git));   // a worktree keeps HEAD in its own folder and the refs in the repository's
-  const refs = common === null ? git : new URL(common.trim().replace(/\/?$/, "/"), git);
+  const refs = common === null ? git : folder(common, git);
   const head = read(new URL("HEAD", git))?.trim();
   if (head === undefined) return null;
   if (/^[0-9a-f]{40}$/.test(head)) return head;
@@ -161,6 +164,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
     rows.set(said, r);
   }
   // 5. index.json, sources.json, the copied candidate files, catalog.json.
+  // names come from the cut row, sources from the count before the cut, by intent: the index lists what exists; omittedSources explains the gap.
   const index = { saids: [...rows.keys()].sort().map((said) => { const r = rows.get(said)!; return { said, sources: servedBy.get(said)!, names: r.publications.map((p) => ({ name: p.publication.name, source: p.source })) }; }) };
   files.set("index.json", jsonBytes(index));
   const entries = [

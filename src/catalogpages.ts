@@ -1,5 +1,6 @@
 import { isSaid } from "./said.ts";
 import { escapeHtml, shell, pageLink, addressLink, offered, STYLE_CSS } from "./pages.ts";
+import { byKey } from "./source.ts";
 import type { Row } from "./catalog.ts";
 
 /** What the build knows of each read source for its pages: whether its document says it has pages, and its base (the rule-checked address's folder, as the visit recorded it). */
@@ -31,7 +32,7 @@ function rowPage(row: Row, sources: SourcePages): string {
 }
 
 /** docs/design.md: a seeded crawl says so in these words; a reader of the pages should see them where catalog.json is never read. */
-const SEEDED_NOTE = "Built from a hand-kept list of sources, not from a finder: a seeded catalog, not a search over strangers.";
+export const SEEDED_NOTE = "Built from a hand-kept list of sources, not from a finder: a seeded catalog, not a search over strangers.";
 
 function indexPage(rows: Row[], seeded: boolean): string {
   const items = rows.map((r) => `<li>${pageLink(r.said, true)}${r.publications.map((p) => ` ${escapeHtml(p.publication.name)} <code>${escapeHtml(p.source)}</code>`).join("")}</li>`);
@@ -41,7 +42,7 @@ function indexPage(rows: Row[], seeded: boolean): string {
 
 /** The catalog's pages: an index and a page per row, in SAID order, with the page writer's guards. A row keyed by anything but a SAID is refused. */
 export function catalogPages(rows: Row[], sources: SourcePages, seeded: boolean): Map<string, string> {
-  const sorted = [...rows].sort((a, b) => (a.said < b.said ? -1 : a.said > b.said ? 1 : 0));
+  const sorted = [...rows].sort(byKey("said"));
   for (const r of sorted) if (!isSaid(r.said)) throw new Error("a row is keyed by a SAID");
   const files = new Map<string, string>();
   files.set("pages/index.html", indexPage(sorted, seeded));

@@ -5,7 +5,7 @@ import { readInputs } from "./inputs.ts";
 import { planBuild, writeFiles, outDirProblem, BuildError } from "./build.ts";
 import { parseHttpsAddress, parseSourceAddress, parseCatalogAddress } from "./address.ts";
 import { Session } from "./session.ts";
-import { WALK, CATALOG, ROW, CONTAINED, type Limits, type RowLimits, type ContainedLimits } from "./limits.ts";
+import { WALK, CATALOG, ROW, CONTAINED, type Limits } from "./limits.ts";
 import { walk } from "./walk.ts";
 import { get } from "./get.ts";
 import { redirectTarget } from "./read.ts";
@@ -15,8 +15,8 @@ import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from 
 import { Robots } from "./robots.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
-/** test, resolve, limits, row and contained exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
-export type RunOptions = { test?: boolean; resolve?: Resolve; limits?: Limits; row?: RowLimits; contained?: ContainedLimits };
+/** test, resolve and limits exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
+export type RunOptions = { test?: boolean; resolve?: Resolve; limits?: Limits };
 
 const FROM_NOTE = "--from must be a source address: https, a DNS name, a path ending in /source.json.";
 
@@ -186,7 +186,7 @@ async function catalog(args: string[], io: Io, options: RunOptions): Promise<num
     candidates.push({ file, bytes });
   }
   const s = new Session(options.limits ?? CATALOG, { test: options.test, resolve: options.resolve });
-  const r = await buildCatalog({ from, candidates, session: s, robots: new Robots(s), row: options.row ?? ROW, contained: options.contained ?? CONTAINED, toolCommit: toolCommit(new URL("../", import.meta.url)) });
+  const r = await buildCatalog({ from, candidates, session: s, robots: new Robots(s), row: ROW, contained: CONTAINED, toolCommit: toolCommit(new URL("../", import.meta.url)) });
   if (!r.ok) { io.out(asciiJson({ problems: [r.problem] }) + "\n"); return 1; }
   writeFiles(r.files, out);
   io.out(asciiJson({ written: r.files.size, ...r.summary, from: from.length, candidates: candidates.length }) + "\n");

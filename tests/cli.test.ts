@@ -258,10 +258,10 @@ test("verify of a file says nothing about browsers: no answer, no header", () =>
   assert.ok(!("browserWallets" in r.json));
 });
 
-test("the usage names four commands", () => {
+test("the usage names five commands", () => {
   const r = run();
   assert.equal(r.code, 2);
-  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "who <SAID> --from <source address>", "get <SAID> --from <source address> --out <folder>"]) assert.ok(r.err.includes(cmd), cmd);
+  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "who <SAID> --from <source address> [--catalog <catalog address>]", "get <SAID> --from <source address> --out <folder>", "catalog build --out <folder> [--candidates <file>]... [--from <source address>]..."]) assert.ok(r.err.includes(cmd), cmd);
 });
 
 test("an out folder filled during the run is a reported failure, never a crash", async () => {
@@ -339,7 +339,7 @@ test("catalog build writes a catalog from --from sources and reports; usage and 
     assert.equal(await main(["catalog", "build", "--out", out, "--from", aAddr], c.io, catalogLocal), 1, "the out folder is not empty now");
     assert.deepEqual(c.json(), { problems: [`${out} is not empty`] });
     const requests = a.requests.length;
-    for (const args of [["catalog"], ["catalog", "find", "--finder", "robots", "--out", out], ["catalog", "build", "--out", join(out, "x")], ["catalog", "build", "--out", join(out, "x"), "--from", "https://1.2.3.4/source.json"]]) {
+    for (const args of [["catalog"], ["catalog", "find", "--finder", "robots", "--out", out], ["catalog", "build", "--out", join(out, "x")], ["catalog", "build", "--out", join(out, "x"), "--from", "https://1.2.3.4/source.json"], ["catalog", "build", "--out", join(out, "y"), "--from", aAddr, "--from", "https://1.2.3.4/source.json"]]) {
       c = capture();
       assert.equal(await main(args, c.io, catalogLocal), 2, args.join(" "));
       assert.equal(c.out(), "");

@@ -447,3 +447,32 @@ test("--catalog: a row that cannot be read is reported on the catalog member; a 
   assert.ok(!r3.ok);
   assert.equal(cat.requests.length, before, "the row is not read when the start could not be");
 });
+
+test("--catalog: a row that is not a row is invalid; a redirected row names its target; a source both introduced for the SAID and listed keeps the introduction's via", async () => {
+  const [a, b, c, cat] = [await start(), await start(), await start(), await start()];
+  const [aAddr, bAddr, cAddr] = [a, b, c].map((o) => `${o.origin}/mad/source.json`);
+  for (const o of [b, c]) o.source("mad/", { serve: [SELECTION] }, inputs);
+  a.source("mad/", { serve: [SELECTION] }, inputs);
+  const catalogAddr = `${cat.origin}/cat/catalog.json`;
+  const rowPath = `/cat/said/${SELECTION}.json`;
+  cat.put(rowPath.slice(1), "{}");
+  const invalid = await walk(SELECTION, aAddr, session(), catalogAddr);
+  assert.ok(invalid.ok); if (!invalid.ok) return;
+  assert.deepEqual(invalid.report.catalog, { address: catalogAddr, listed: 0, taken: 0, reason: "invalid" });
+
+  cat.behave = (req, res) => { if (req.url === rowPath) { res.statusCode = 302; res.setHeader("location", "https://moved.test/row.json"); res.end(); return true; } return false; };
+  try {
+    const moved = await walk(SELECTION, aAddr, session(), catalogAddr);
+    assert.ok(moved.ok); if (!moved.ok) return;
+    assert.deepEqual(moved.report.catalog, { address: catalogAddr, listed: 0, taken: 0, reason: "redirected", target: "https://moved.test/row.json" });
+  } finally { cat.behave = null; }
+
+  // Decision 8: the start introduces b for the SAID and the row lists b and c; b is visited once, by the introduction.
+  a.source("mad/", { serve: [SELECTION], introductions: [{ source: bAddr, for: [SELECTION] }] }, inputs);
+  cat.put(rowPath.slice(1), JSON.stringify({ said: SELECTION, serves: [{ source: bAddr }, { source: cAddr }] }));
+  const both = await walk(SELECTION, aAddr, session(), catalogAddr);
+  assert.ok(both.ok); if (!both.ok) return;
+  assert.deepEqual(both.report.catalog, { address: catalogAddr, listed: 2, taken: 1 });
+  assert.deepEqual(both.report.sources.find((s) => s.address === bAddr)!.via, [aAddr]);
+  assert.deepEqual(both.report.sources.find((s) => s.address === cAddr)!.via, [catalogAddr]);
+});
