@@ -1,23 +1,22 @@
 import { isSaid } from "./said.ts";
-import { parseSourceAddress, type AddressOptions } from "./address.ts";
 import { escapeHtml, shell, pageLink, addressLink, offered, STYLE_CSS } from "./pages.ts";
 import type { Row } from "./catalog.ts";
 
+/** What the build knows of each read source for its pages: whether its document says it has pages, and its base (the rule-checked address's folder, as the visit recorded it). */
 export type SourcePages = Map<string, { pages: boolean; base: string }>;
 
 /** A link to a source's own page for a SAID, only when that source says it has pages; otherwise the address as text. */
-function sourceFor(address: string, said: string, sources: SourcePages, opts: AddressOptions): string {
+function sourceFor(address: string, said: string, sources: SourcePages): string {
   if (!isSaid(said)) throw new Error("only a SAID names a page");
   const s = sources.get(address);
-  const parsed = parseSourceAddress(address, opts);
-  if (s === undefined || !s.pages || parsed === null) return `<code>${escapeHtml(address)}</code>`;
-  return addressLink(`${parsed.base}pages/${said}/index.html`, address);
+  if (s === undefined || !s.pages) return `<code>${escapeHtml(address)}</code>`;
+  return addressLink(`${s.base}pages/${said}/index.html`, address);
 }
 
-function rowPage(row: Row, sources: SourcePages, opts: AddressOptions): string {
-  const serves = row.serves.map((s) => `<li>${sourceFor(s.source, row.said, sources, opts)}</li>`);
+function rowPage(row: Row, sources: SourcePages): string {
+  const serves = row.serves.map((s) => `<li>${sourceFor(s.source, row.said, sources)}</li>`);
   const publications = row.publications.map((p) => `${offered(p.publication, p.by)}<p>From <code>${escapeHtml(p.source)}</code></p>`);
-  const referrers = row.referrers.map((r) => `<li>${sourceFor(r.source, r.said, sources, opts)}: ${pageLink(r.said, false)}${r.paths.length > 0 ? ` at ${r.paths.map((p) => `<code>${escapeHtml(p)}</code>`).join(", ")}` : ""}${r.appearances > r.paths.length ? ` (${r.appearances} appearances)` : ""}</li>`);
+  const referrers = row.referrers.map((r) => `<li>${sourceFor(r.source, r.said, sources)}: ${pageLink(r.said, false)}${r.paths.length > 0 ? ` at ${r.paths.map((p) => `<code>${escapeHtml(p)}</code>`).join(", ")}` : ""}${r.appearances > r.paths.length ? ` (${r.appearances} appearances)` : ""}</li>`);
   const counts = row.counts.map((c) => `<li><code>${escapeHtml(c.source)}</code>: ${c.publications} publications, ${c.referrers} definitions that contain it</li>`);
   const omitted = row.omittedSources !== undefined ? `<p>${row.omittedSources} source${row.omittedSources === 1 ? "" : "s"} left out: the row reached its size limit.</p>` : "";
   const body = `<header><p><a href="../index.html">This catalog</a></p><h1><code>${escapeHtml(row.said)}</code></h1></header>
@@ -41,12 +40,12 @@ function indexPage(rows: Row[], seeded: boolean): string {
 }
 
 /** The catalog's pages: an index and a page per row, in SAID order, with the page writer's guards. A row keyed by anything but a SAID is refused. */
-export function catalogPages(rows: Row[], sources: SourcePages, opts: AddressOptions, seeded: boolean): Map<string, string> {
+export function catalogPages(rows: Row[], sources: SourcePages, seeded: boolean): Map<string, string> {
   const sorted = [...rows].sort((a, b) => (a.said < b.said ? -1 : a.said > b.said ? 1 : 0));
   for (const r of sorted) if (!isSaid(r.said)) throw new Error("a row is keyed by a SAID");
   const files = new Map<string, string>();
   files.set("pages/index.html", indexPage(sorted, seeded));
   files.set("pages/style.css", STYLE_CSS);
-  for (const r of sorted) files.set(`pages/${r.said}/index.html`, rowPage(r, sources, opts));
+  for (const r of sorted) files.set(`pages/${r.said}/index.html`, rowPage(r, sources));
   return files;
 }

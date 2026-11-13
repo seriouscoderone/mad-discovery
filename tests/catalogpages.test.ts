@@ -19,10 +19,10 @@ const tags = (html: string) => [...html.matchAll(/<([a-zA-Z0-9]+)[\s>]/g)].map((
 const SEEDED = "Built from a hand-kept list of sources, not from a finder: a seeded catalog, not a search over strangers.";
 
 test("the index lists rows in SAID order with names beside their source, linking each SAID to its page; a seeded build says so there", () => {
-  const files = catalogPages(rows, sources, {}, false);
+  const files = catalogPages(rows, sources,false);
   const index = files.get("pages/index.html")!;
   assert.ok(!index.includes("hand-kept"), "a build from candidate files says nothing about seeding");
-  assert.ok(catalogPages(rows, sources, {}, true).get("pages/index.html")!.includes(SEEDED), "a seeded build says so on the index");
+  assert.ok(catalogPages(rows, sources,true).get("pages/index.html")!.includes(SEEDED), "a seeded build says so on the index");
   assert.ok(index.indexOf(X) < index.indexOf(Y));
   assert.deepEqual(links(index).filter((l) => l !== "style.css"), [`${X}/index.html`, `${Y}/index.html`]);
   assert.ok(index.includes("&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;"), "the hostile name is text");
@@ -31,7 +31,7 @@ test("the index lists rows in SAID order with names beside their source, linking
 });
 
 test("a SAID's page links a serving source only when it has pages, shows publications and counts, and renders hostile text inert", () => {
-  const page = catalogPages(rows, sources, {}, true).get(`pages/${X}/index.html`)!;
+  const page = catalogPages(rows, sources,true).get(`pages/${X}/index.html`)!;
   const hrefs = links(page);
   assert.ok(hrefs.includes(`https://a.example/mad/pages/${X}/index.html`), "A has pages: linked");
   assert.ok(!hrefs.some((h) => h.startsWith("https://b.example")), "B has no pages: shown as text only");
@@ -51,5 +51,5 @@ test("a SAID's page links a serving source only when it has pages, shows publica
   for (const t of tags(page)) assert.ok(allowed.has(t), `element ${t}`);
   assert.ok(page.includes(`content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'"`));
   assert.ok(!page.includes("hand-kept"), "the seeded note is on the index only; a row says what sources say");
-  assert.throws(() => catalogPages([{ ...rows[1]!, said: "../../etc/passwd" }], sources, {}, false), /SAID/);
+  assert.throws(() => catalogPages([{ ...rows[1]!, said: "../../etc/passwd" }], sources,false), /SAID/);
 });
