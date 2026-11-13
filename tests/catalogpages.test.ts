@@ -51,5 +51,11 @@ test("a SAID's page links a serving source only when it has pages, shows publica
   for (const t of tags(page)) assert.ok(allowed.has(t), `element ${t}`);
   assert.ok(page.includes(`content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'"`));
   assert.ok(!page.includes("hand-kept"), "the seeded note is on the index only; a row says what sources say");
-  assert.throws(() => catalogPages([{ ...rows[1]!, said: "../../etc/passwd" }], sources,false), /SAID/);
+  const y = catalogPages(rows, sources, false).get(`pages/${Y}/index.html`)!;
+  assert.ok(y.includes("No publication.") && y.includes("No definition in this catalog contains it."), "the empty branches render");
+  assert.ok(!y.includes("left out"), "no omittedSources, no note");
+  const stranger = "https://c.example/source.json";
+  const orphan = catalogPages([{ said: Y, serves: [{ source: stranger }], publications: [], referrers: [], counts: [{ source: stranger, publications: 0, referrers: 0 }] }], sources, false).get(`pages/${Y}/index.html`)!;
+  assert.ok(!links(orphan).some((h) => h.startsWith("https://c.example")) && orphan.includes(stranger), "a source the pages map does not know is shown as text, never linked");
+  assert.throws(() => catalogPages([{ ...rows[1]!, said: "../../etc/passwd" }], sources, false), /SAID/);
 });
