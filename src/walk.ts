@@ -112,12 +112,12 @@ async function readRow(catalog: string, said: string, session: Session): Promise
   if (f.outcome !== "ok") return { reason: f.outcome, ...redirectTarget(f) };
   const row = parseBounded(f.bytes);
   if (!row.ok || !isRecord(row.value) || !Array.isArray(row.value["serves"])) return { reason: "invalid" };
-  const addresses: string[] = [];
+  const addresses = new Set<string>();   // a row is open to flooding: linear in its length
   for (const s of row.value["serves"]) {
     const a = isRecord(s) && typeof s["source"] === "string" ? parseSourceAddress(s["source"], { test: session.test }) : null;
-    if (a !== null && !addresses.includes(a.address)) addresses.push(a.address);
+    if (a !== null) addresses.add(a.address);
   }
-  return { addresses: addresses.sort(), listed: row.value["serves"].length };
+  return { addresses: [...addresses].sort(), listed: row.value["serves"].length };
 }
 
 /** A random sample of n, in address order; the row is open to flooding and any fixed order can be occupied. */
