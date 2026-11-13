@@ -61,7 +61,8 @@ export class Session {
     const timeoutMs = Math.min(this.limits.requestMs, this.limits.hostMs - h.ms, this.remainingRun());
     const maxBytes = Math.min(this.limits.fileBytes, this.limits.hostBytes - h.bytes);
     if (timeoutMs <= 0 || maxBytes <= 0) return { outcome: "timed-out", read: 0, ms: 0 };
-    const r = await fetchJson(href, { test: this.test, resolve: this.resolve, now: this.now, timeoutMs, maxBytes, ...mode });
+    // The mode is spread first: nothing a caller passes can override the session's budgets or the test gate.
+    const r = await fetchJson(href, { ...mode, test: this.test, resolve: this.resolve, now: this.now, timeoutMs, maxBytes });
     h.ms += r.ms;
     h.bytes += r.read;
     // A body cut by the host's remaining bytes rather than the file limit means the host is used up, not that the file is bad.
