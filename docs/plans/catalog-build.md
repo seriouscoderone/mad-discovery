@@ -16,7 +16,7 @@
 
 From `docs/design.md`; every task's requirements include these, and the step 1 and 2 plans' constraints still hold (one fetch routine, the address rule, the `test` option for test code only, ASCII-only sources, no new dependency, strangers' strings only as JSON values or through `escapeHtml`).
 
-- **Limits, catalog build column:** one request 10 s; one file 1 MB; 500 definitions from one source in SAID order; 10 introductions from one source (the first ten listed, in address order); introduction depth 3; 1,000 sources per run; 120 s and 100 MB per host; 8 hosts in flight; no clock for the whole run. A count limit cuts in a fixed order and the source is `truncated` with the limits that cut it, in table order (`definitions`, `introductions`); a source whose host uses up its time or bytes is dropped whole (`timed-out`) and the host's sources not yet started are `skipped` with the limit's name. Row limits: from one source a row takes one publication of the SAID (the first in its document; the rest are counted) and at most 50 definitions that contain the SAID, lowest SAID first, with the full count stated; a row is at most 1 MB, keeping contributing sources in the build's order up to that size and stating how many it left out. All in `src/limits.ts`; `catalog.json` writes every limit the build ran with, the path and publication limits included.
+- **Limits, catalog build column:** one request 10 s; one file 1 MB; 500 definitions from one source in SAID order; 10 introductions from one source (the first ten listed, in address order); contained SAIDs recorded from one definition, 200, and from one source, 5,000, lowest SAID first, the rest counted but not recorded (stress test, branch 1: what the build keeps in memory is bounded, not only what it fetches); introduction depth 3; 1,000 sources per run; 120 s and 100 MB per host; 8 hosts in flight; no clock for the whole run. A count limit cuts in a fixed order and the source is `truncated` with the limits that cut it, in table order (`definitions`, `introductions`, `contained`); a source whose host uses up its time or bytes is dropped whole (`timed-out`) and the host's sources not yet started are `skipped` with the limit's name. Row limits: from one source a row takes one publication of the SAID (the first in its document; the rest are counted) and at most 50 definitions that contain the SAID, lowest SAID first, with the full count stated; a row is at most 1 MB, keeping contributing sources in the build's order up to that size and stating how many it left out. All in `src/limits.ts`; `catalog.json` writes every limit the build ran with, the path and publication limits included.
 - **Order and repeatability:** sources are taken breadth-first in the order the walk uses (introducing sources in address order, each source's introductions in address order, one from each in turn; a catalog build asks about no SAID, so nothing is `named`). Candidates named with `--from` and read from candidate files are de-duplicated and visited in sorted order at depth 0; if more remain than the limit on sources per run the build stops, writes nothing and reports the count. What a build includes is decided by counts and fixed order, never by which answer arrived first. Two builds of the same inputs over sources that answer alike produce byte-identical files. No file holds the catalog's own address; no file holds a time. Every file the build composes is written ASCII-only, with the same `\u` escaping as the walk's report; a copied candidate file is the one exception: it is the bytes read, so another party can compare it.
 - **Strings (Ruling 12):** a stranger's string that is not well-formed Unicode (a lone surrogate) fails its rule as a control character does: a publication with one is dropped and counted by the reader; a JSON Pointer path whose key holds one is not reported (the occurrence is still counted); a candidate file's `place` value with one is dropped. A browser wallet's store cannot hold such text and refuses the whole file it sits in.
 - **Rows:** a SAID has a row only when a visited source served bytes for it that passed the check; a SAID that definitions contain but no source serves has no row and appears nowhere. Every statement is attributed to the source address it was fetched from; nothing in one source's files can create or change a row attributed to another. Publications are recorded as claimed, only in rows that exist, and carry the source document's `by` when the publication has none (stated, never verified). A count of sources is a count of addresses and is reported as such. No row is carried over; a source that cannot be reached adds nothing and is listed with its outcome. An empty build (no source `ok` or `truncated`) writes nothing and exits non-zero. Posting is open: no build leaves a source out.
@@ -33,14 +33,16 @@ The design fixes the files' members in prose; this plan fixes their JSON. Each i
 1. **Candidate file** (written by step 6, read here): `{ "finder": "<name>", "snapshot": "<crawl name or date>", "candidates": [ { "address": "<source address>", "place": { ... } } ] }`; `place` is free-form per finder (the robots finder: `{ "file": "<archive file>", "offset": <n> }`; the GitHub finder: `{ "repository": "<owner/name>" }`), its keys limited to `^[A-Za-z][A-Za-z0-9_]{0,31}$` and its values to well-formed strings and numbers (Ruling 12). `finder` and `snapshot` match `^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$` (no leading dot: `.` and `..` would leave the folder), because the build copies the file to `candidates/<finder>/<snapshot>.json`; two files that would land on one path, compared case-insensitively, refuse the build.
 2. **`catalog.json`:** `{ "tool": { "commit": "<40 hex>" | null }, "from": [addresses], "candidates": [ { "finder", "snapshot", "count", "path" } ], "droppedCandidates": <n not source addresses>, "limits": { ...the catalog Limits, "paths": PATH_LIMITS, "publication": PUBLICATION, "row": ROW }, "seeded": <true when no candidate file was given>, "note": "<the design's sentence, when seeded>" }`. The design decides that every table limit is written and that a seeded build says so; the shape is the plan's.
 3. **`index.json`:** `{ "saids": [ { "said", "sources": <n addresses that served it, before any row cut>, "names": [ { "name", "source" } ] } ] }` sorted by SAID, names in source-address order. The index is the list of what exists; a row's `omittedSources` explains any gap.
-4. **`said/<SAID>.json`:** `{ "said", "serves": [ { "source" } ], "publications": [ { "source", "by"?, "publication" } ], "referrers": [ { "source", "said", "paths", "appearances" } ], "counts": [ { "source", "publications": <total>, "referrers": <total> } ], "omittedSources"?: <n> }`; sources in the build's order; a `counts` entry for every source that serves, publishes or contains; within a source referrers by SAID; `by` is the source document's stated AID when the publication has none, so the catalog page can say who offers as the source page does.
+4. **`said/<SAID>.json`:** `{ "said", "serves": [ { "source" } ], "publications": [ { "source", "by"?, "publication" } ], "referrers": [ { "source", "said", "paths", "appearances" } ], "counts": [ { "source", "publications": <total>, "referrers": <total> } ], "omittedSources"?: <n> }`; sources in the build's order; a `counts` entry for every source that serves, publishes or contains; within a source referrers by SAID; `by` is the source document's stated AID when the publication has none, so the catalog page can say who offers as the source page does. A row over `rowBytes` drops contributing sources from the end of the build's order, never the first; if the first alone exceeds the limit the build fails. That failure is unreachable at the shipped limits and stays as the invariant's guard (stress test, branch 4): one source's share of a row is one publication (about 2.5 KB at `PUBLICATION`'s limits), at most 50 referrers of 16 paths of 256 characters (about 210 KB) and a `counts` entry, about 215 KB against 1 MB. A change to `ROW`, `PATH_LIMITS` or `PUBLICATION` re-checks this arithmetic.
 5. **`sources.json`:** `{ "sources": [ { "address", "found": [ { "by": "from" } | { "by": "introduction", "from": "<address>" } | { "by": "finder", "finder", "snapshot", "place" } ], "outcome", "limits": [names], "dropped": { "entries", "publications" }, "digest": "<hex>" | null, "definitions": [ { "said", "outcome" } ], "untried": <n>, "refers": [ { "in": "<definition>", "said", "outcome": "not-contained" } ] } ] }` sorted by address. `found` lists every way (the design: "every introducing address"), `from` entries first, finder entries next, introductions last by introducing address. `limits` names every count limit that cut the source, in table order, and the budget that stopped a skipped one. `definitions` lists fetched definitions that did not end `verified`; `untried` counts the ones beyond the definitions cut (the design's "truncated with the limit" reading; a 5,500-definition source would otherwise add 5,000 lines). The digest is kept for a source dropped whole after its document was read, since the digest is what lets two builders compare that source.
 6. **The robots.txt check:** what the design fixes: the group for `mad-discovery`, else `*`; a 4xx answer is no restrictions; 5xx, no answer or a redirect is `disallowed`. What the plan adds: the check applies to the source document's path and to each definition's path; matching follows RFC 9309 (longest match wins, `Allow` wins a tie, `*` and `$` understood, percent-encoded unreserved octets decoded before comparison, the group chosen by product-token match); a `text/plain` answer is required and a 200 with another type, an encoding or over 1 MB counts as unreadable (`disallowed`), the strict side; an address the fetch routine refuses keeps `refused-address`.
 7. **The tool's commit** is read from `.git/HEAD` of the checkout `bin/` runs from (through the ref it names, loose or packed; a worktree's `.git` file naming a `gitdir:` is followed); `null` when there is none. No child process.
 8. **`who --catalog`'s sample** uses `crypto.randomInt`; the row's addresses join the depth-1 round-robin as one more introducing list keyed by the catalog's address; the row is read only after the start was. `taken` counts the slots the row filled: a row address the starting source also introduces by name, whose list sorts ahead of the catalog's in the round-robin, enters on that introduction with `via: [from]` and is not counted, as the start itself is not when the row lists it.
-9. **ASCII files.** Every file the build composes is written with the walk report's `\u` escaping (`asciiJson`, moved to `src/json.ts`), so a row shown on a terminal cannot redraw it and two builders' files are byte-identical regardless of locale. A copied candidate file is the bytes read, not re-encoded.
+9. **ASCII files.** Every file the build composes is written with the walk report's `\u` escaping (`asciiJson`, moved to `src/json.ts`), so a row shown on a terminal cannot redraw it and two builders' files are byte-identical regardless of locale. A copied candidate file is the bytes read, not re-encoded; step 6's finders write those files through `asciiJson`, so the copies are ASCII as well (stress test, branch 6: a note for the step 6 plan).
 10. **One options object for `Session.fetch`.** Ruling 11 gave `Session.fetch` a second positional argument (`asBrowser`); this plan needs a second mode (`type`). Both become members of one options object, `fetch(address, { type?, asBrowser? })`, and `verify`'s call changes to match. Nothing about `verify`'s behaviour changes.
 11. **Well-formed strings (Ruling 12, bpm-7h1.14).** Raised by the Fortoid session: a browser wallet's store cannot hold a lone surrogate, so it refuses any file holding one, and one hostile publication name would make a row and `index.json` unreadable to every wallet. The maintainer adopted the rule on 2026-11-12: `String.prototype.isWellFormed()` joins the control-character check wherever a stranger's string is accepted. Task 0 puts it in the source rules and the scan; Task 5 applies it to `place` values. A format rule, not an exclusion list.
+12. **What the build keeps is bounded (stress test, branch 1).** The network limits bound what a build fetches, not what it keeps: a contained SAID's record (paths included) can be a hundred times its 44 bytes on the wire. Two count limits, `CONTAINED = { perDefinition: 200, perSource: 5_000 }`, cut the recording lowest SAID first; the rest are counted (`omittedContained`, per definition and per source, in `sources.json`) and the source is `truncated` with `contained`. `refers` entries are still checked against the full scan. The design's limits table gains the two rows.
+13. **The seeded note reaches the pages (stress test, branch 2).** `catalog.json`'s "seeded" sentence is read by nobody who matters; the catalog's index page carries it when the build was seeded, so a person sees that the catalog is a hand-kept list and not a search over strangers. Rows are unchanged.
 
 ## File structure
 
@@ -48,7 +50,7 @@ The design fixes the files' members in prose; this plan fixes their JSON. Each i
 mad-discovery/
   src/source.ts         validatePublication: a field is well-formed Unicode (Ruling 12)
   src/scan.ts           paths(): a pointer whose key is not well-formed is not reported
-  src/limits.ts         + CATALOG: Limits (the build's column), ROW: { referrersPerSource: 50, rowBytes: 1_000_000 }, RowLimits
+  src/limits.ts         + CATALOG: Limits (the build's column), ROW: { referrersPerSource: 50, rowBytes: 1_000_000 }, RowLimits, CONTAINED: { perDefinition: 200, perSource: 5_000 }, ContainedLimits
   src/json.ts           asciiJson (from cli.ts), used by the command and the catalog files
   src/fetch.ts          FetchOptions.type?: "json" | "text"; text accepts text/plain; a non-ok ending carries status
   src/session.ts        fetch(address, { type?, asBrowser? } = {})
@@ -69,6 +71,8 @@ Dependencies between tasks: 0 -> 1 -> 2 -> 4; 1 -> 3 -> 7; 3 and 4 -> 5 -> 6; 5,
 ---
 
 ### Task 0: A stranger's string is well-formed Unicode (Ruling 12)
+
+Asked by the wallet's session as `github.com/seriouscoderone/mad-discovery/issues/1`; when this task's commit lands, name it there (the issue's "done when").
 
 **Files:**
 - Modify: `src/source.ts`, `src/scan.ts`, `tests/config.test.ts`, the test file that covers `paths` (`tests/scan.test.ts`; if the scan's tests live in another file, append there)
@@ -137,7 +141,7 @@ git commit -m "feat: a stranger's string is well-formed Unicode, in publications
 - Modify: `src/limits.ts`, `src/fetch.ts`, `src/session.ts`, `src/cli.ts` (import `asciiJson`; `verify`'s fetch call), `tests/fetch.test.ts`, `tests/session.test.ts`, `tests/cli.test.ts` (import `asciiJson` from `../src/json.ts`)
 
 **Interfaces:**
-- Produces: `CATALOG: Limits`, `ROW = { referrersPerSource: 50, rowBytes: FILE_BYTES }`, `type RowLimits` in `src/limits.ts`; `asciiJson(value: unknown): string` in `src/json.ts`; `type FetchType = "json" | "text"`; `FetchOptions.type?: FetchType` (default `"json"`); `Fetched`'s non-ok endings gain `status?: number` (the answer's status for a non-200, `200` for a wrong content type or encoding); `type FetchMode = { type?: FetchType; asBrowser?: boolean }`; `Session.fetch(address: string, mode: FetchMode = {})`.
+- Produces: `CATALOG: Limits`, `ROW = { referrersPerSource: 50, rowBytes: FILE_BYTES }`, `type RowLimits`, `CONTAINED: ContainedLimits = { perDefinition: 200, perSource: 5_000 }`, `type ContainedLimits = { perDefinition: number; perSource: number }` in `src/limits.ts`; `asciiJson(value: unknown): string` in `src/json.ts`; `type FetchType = "json" | "text"`; `FetchOptions.type?: FetchType` (default `"json"`); `Fetched`'s non-ok endings gain `status?: number` (the answer's status for a non-200, `200` for a wrong content type or encoding); `type FetchMode = { type?: FetchType; asBrowser?: boolean }`; `Session.fetch(address: string, mode: FetchMode = {})`.
 
 **Acceptance Criteria:**
 - `CATALOG` has the design's catalog column: `requestMs 10_000, fileBytes FILE_BYTES, definitionsPerSource 500, introductionsPerSource 10, introductionDepth 3, sourcesPerRun 1_000, hostMs 120_000, hostBytes 100_000_000, hostsInFlight 8, runMs null`.
@@ -173,7 +177,7 @@ test("a non-ok ending names the status it saw: the answer's for a 4xx, 200 for a
 });
 ```
 
-Append to `tests/session.test.ts` (and change its limits import to `import { WALK, CATALOG, ROW, type Limits } from "../src/limits.ts";`):
+Append to `tests/session.test.ts` (and change its limits import to `import { WALK, CATALOG, ROW, CONTAINED, type Limits } from "../src/limits.ts";`):
 
 ```ts
 test("fetch takes its modes in one object: the text mode passes through and is charged like any request; asBrowser adds Origin", async () => {
@@ -195,6 +199,7 @@ test("fetch takes its modes in one object: the text mode passes through and is c
 test("the catalog's limits are the design's column", () => {
   assert.deepEqual(CATALOG, { requestMs: 10_000, fileBytes: 1_000_000, definitionsPerSource: 500, introductionsPerSource: 10, introductionDepth: 3, sourcesPerRun: 1_000, hostMs: 120_000, hostBytes: 100_000_000, hostsInFlight: 8, runMs: null });
   assert.deepEqual(ROW, { referrersPerSource: 50, rowBytes: 1_000_000 });
+  assert.deepEqual(CONTAINED, { perDefinition: 200, perSource: 5_000 });
 });
 ```
 
@@ -227,6 +232,10 @@ export const CATALOG: Limits = {
 /** What one source may add to a catalog row, and how large a row may be: a reader fetches a row as one file. */
 export type RowLimits = { referrersPerSource: number; rowBytes: number };
 export const ROW: RowLimits = { referrersPerSource: 50, rowBytes: FILE_BYTES };
+
+/** How many contained SAIDs a catalog build records, with their paths, from one definition and from one source: what it keeps in memory is bounded, not only what it fetches. The rest are counted. */
+export type ContainedLimits = { perDefinition: number; perSource: number };
+export const CONTAINED: ContainedLimits = { perDefinition: 200, perSource: 5_000 };
 ```
 
 `src/json.ts`:
@@ -751,12 +760,13 @@ git commit -m "refactor: the breadth-first driver in one place, for the walk and
 
 **Interfaces:**
 - Consumes: `readSource`, `Reason`; `Session`; `Robots`; `checkSaid`; `appearances`, `paths`; `definitionAddress`; `Node`, `Candidate`; `blake3` from `@noble/hashes/blake3.js`; `bytesToHex` from `@noble/hashes/utils.js`.
-- Produces: `ReadSource`'s ok branch gains `bytes: Uint8Array` (the document bytes read). In `src/visit.ts`: `type Contains = { said: string; paths: string[]; appearances: number }`; `type Definition = { said: string; contains: Contains[] }`; `type SourceVisit = Node & { outcome: Reason | "ok"; limits: string[]; digest: string | null; dropped: Dropped; document: SourceDocument | null; base: string | null; verified: Definition[]; failed: { said: string; outcome: Reason }[]; untried: number; notContained: { in: string; said: string }[] }`; `visitAll(c: Candidate, session: Session, robots: Robots): Promise<SourceVisit>`.
+- Produces: `ReadSource`'s ok branch gains `bytes: Uint8Array` (the document bytes read). In `src/visit.ts`: `type Contains = { said: string; paths: string[]; appearances: number }`; `type Definition = { said: string; contains: Contains[]; omittedContained: number }`; `type SourceVisit = Node & { outcome: Reason | "ok"; limits: string[]; digest: string | null; dropped: Dropped; document: SourceDocument | null; base: string | null; verified: Definition[]; failed: { said: string; outcome: Reason }[]; untried: number; omittedContained: number; notContained: { in: string; said: string }[] }`; `visitAll(c: Candidate, session: Session, robots: Robots, contained: ContainedLimits = CONTAINED): Promise<SourceVisit>`.
 
 **Acceptance Criteria:**
 - A source whose host's robots.txt disallows its document path ends `disallowed`; one whose robots.txt could not be read ends `disallowed`; one whose address the routine refused ends `refused-address`; in each case nothing is fetched from it but the robots.txt. A definition path that is disallowed while the document is allowed ends that definition `disallowed` and the rest proceed.
 - The document is read (`fetched` true, requested once) and every served definition is fetched in SAID order up to `definitionsPerSource`; each ends `verified` (its `contains` holds every SAID that appears in its bytes other than its own, each with `paths` and `appearances` from the scan) or `failed-check`, or the fetch outcome. Definitions beyond the cut are counted in `untried` and the source is `truncated` with `"definitions"` in `limits`; more introductions than the limit also make it `truncated`, with `"introductions"` in `limits`, after `"definitions"` when both.
 - A `refers` entry the scan does not find in verified bytes is recorded under `notContained` as `{ in, said }`; a `refers` entry whose definition did not verify is not.
+- A definition's `contains` holds at most `contained.perDefinition` SAIDs, and a source's definitions together at most `contained.perSource`, lowest SAID first; the rest are counted in the definition's and the source's `omittedContained`, the source is `truncated` with `"contained"` in `limits` (after `"introductions"`), and `refers` entries are still checked against the full scan.
 - `digest` is the lowercase hex Blake3-256 of the document bytes as read; `null` when the document was not read; kept when the source is dropped whole afterwards.
 - A host whose time or bytes run out during the source gives `outcome: "timed-out"`, `read: false`, `fetched: true`, the digest, and nothing of its definitions; a source skipped before it starts gives `skipped` with the budget's name in `limits`.
 - The visit holds no definition bytes after it returns.
@@ -782,6 +792,7 @@ import { Session } from "../src/session.ts";
 import { Robots } from "../src/robots.ts";
 import { CATALOG, type Limits } from "../src/limits.ts";
 import { visitAll } from "../src/visit.ts";
+import { byKey } from "../src/source.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const { inputs } = readInputs(fileURLToPath(new URL("../fixtures/compact/", import.meta.url)));
@@ -812,10 +823,11 @@ test("a source is read whole: every served definition fetched in SAID order, ver
   assert.deepEqual(v.verified.map((d) => d.said), plan.document.serves.map((x) => x.said));
   for (const d of v.verified) {
     const bytes = inputs.get(d.said)!;
-    assert.deepEqual(d.contains.map((c) => c.said), appearances(bytes, d.said));
+    assert.deepEqual(d.contains.map((c) => c.said), [...appearances(bytes, d.said)].sort(), "lowest SAID first");
+    assert.equal(d.omittedContained, 0);
     for (const c of d.contains) { const p = paths(bytes, c.said); assert.deepEqual(c.paths, p.paths); assert.equal(c.appearances, p.count); }
   }
-  assert.deepEqual(v.failed, []); assert.equal(v.untried, 0); assert.deepEqual(v.notContained, []);
+  assert.deepEqual(v.failed, []); assert.equal(v.untried, 0); assert.equal(v.omittedContained, 0); assert.deepEqual(v.notContained, []);
   assert.equal(v.document?.pages, true); assert.equal(v.base, `${a.origin}/mad/`);
   assert.equal(a.requests.filter((p) => p === "robots.txt").length, 1);
 });
@@ -885,6 +897,30 @@ test("a host used up during the source is dropped whole but keeps its digest; on
   const v2 = await visitAll(cand(`${a.origin}/other/source.json`), s, new Robots(s));
   assert.equal(v2.outcome, "skipped"); assert.deepEqual(v2.limits, ["host-bytes"]);
 });
+
+test("contained SAIDs recorded from one definition and from one source are bounded, lowest SAID first; the rest are counted", async () => {
+  const a = await start(); robotsOk(a);
+  const inner = Array.from({ length: 5 }, (_, i) => definition([], `,"n":${i}`));
+  const saids = inner.map((d) => d.said).sort();
+  const big = definition(saids, ',"n":"big"');
+  const big2 = definition(saids, ',"n":"big2"');
+  const served = [big, big2].sort(byKey("said"));
+  const address = `${a.origin}/s/source.json`;
+  a.put("s/source.json", JSON.stringify({ source: address, serves: served.map((d) => ({ said: d.said })) }));
+  for (const d of served) a.put(`s/definitions/${d.said}.json`, d.bytes);
+  const s = session();
+  const v = await visitAll(cand(address), s, new Robots(s), { perDefinition: 3, perSource: 4 });
+  assert.equal(v.outcome, "truncated"); assert.deepEqual(v.limits, ["contained"]);
+  const [d1, d2] = v.verified;
+  assert.deepEqual(d1!.contains.map((c) => c.said), saids.slice(0, 3), "the first definition takes three, the lowest");
+  assert.equal(d1!.omittedContained, 2);
+  assert.deepEqual(d2!.contains.map((c) => c.said), saids.slice(0, 1), "one slot of the source's four is left");
+  assert.equal(d2!.omittedContained, 4);
+  assert.equal(v.omittedContained, 6);
+  const loose = session();
+  const w = await visitAll(cand(address), loose, new Robots(loose));
+  assert.equal(w.outcome, "ok"); assert.equal(w.omittedContained, 0); assert.equal(w.verified[0]!.contains.length, 5);
+});
 ```
 
 - [ ] **Step 3: Run the tests to see them fail**
@@ -902,14 +938,15 @@ import { appearances, paths } from "./scan.ts";
 import { definitionAddress } from "./address.ts";
 import { readSource, type Reason } from "./read.ts";
 import { Session } from "./session.ts";
+import { CONTAINED, type ContainedLimits } from "./limits.ts";
 import type { Robots } from "./robots.ts";
 import type { Candidate, Node } from "./crawl.ts";
 import type { Dropped } from "./document.ts";
 import type { SourceDocument } from "./source.ts";
 
 export type Contains = { said: string; paths: string[]; appearances: number };
-/** A verified definition, by what its bytes contain; the bytes themselves are not kept. */
-export type Definition = { said: string; contains: Contains[] };
+/** A verified definition, by what its bytes contain; the bytes themselves are not kept, and the record is bounded (omittedContained counts the rest). */
+export type Definition = { said: string; contains: Contains[]; omittedContained: number };
 
 export type SourceVisit = Node & {
   outcome: Reason | "ok";
@@ -921,18 +958,20 @@ export type SourceVisit = Node & {
   verified: Definition[];
   failed: { said: string; outcome: Reason }[];
   untried: number;                             // definitions beyond the cut, never fetched
+  omittedContained: number;                    // contained SAIDs beyond the recording limits, counted but not recorded
   notContained: { in: string; said: string }[];
 };
 
-const empty = (c: Candidate): SourceVisit => ({ address: c.address, via: c.via, fetched: false, read: false, introductions: [], outcome: "ok", limits: [], digest: null, dropped: { entries: 0, publications: 0 }, document: null, base: null, verified: [], failed: [], untried: 0, notContained: [] });
+const empty = (c: Candidate): SourceVisit => ({ address: c.address, via: c.via, fetched: false, read: false, introductions: [], outcome: "ok", limits: [], digest: null, dropped: { entries: 0, publications: 0 }, document: null, base: null, verified: [], failed: [], untried: 0, omittedContained: 0, notContained: [] });
 
 /**
  * The catalog build's visit of one source (docs/design.md "The catalog", step 3): the robots.txt rule, then the document, then every
  * served definition in SAID order up to the limit, each checked and scanned. What a definition contains is recorded with the scan's
  * paths so that no bytes outlive the visit. A refers entry the scan does not find in verified bytes ends not-contained.
  */
-export async function visitAll(c: Candidate, session: Session, robots: Robots): Promise<SourceVisit> {
+export async function visitAll(c: Candidate, session: Session, robots: Robots, contained: ContainedLimits = CONTAINED): Promise<SourceVisit> {
   const v = empty(c);
+  let recorded = 0;   // contained SAIDs recorded for this source, against contained.perSource
   const host = Session.hostOf(c.address);
   const stop = session.exhausted(host);
   if (stop !== null) return { ...v, outcome: "skipped", limits: [stop] };
@@ -953,9 +992,12 @@ export async function visitAll(c: Candidate, session: Session, robots: Robots): 
     const g = await session.fetch(address);
     if (g.outcome !== "ok") { v.failed.push({ said: entry.said, outcome: g.outcome }); continue; }
     if (!checkSaid(g.bytes, entry.said)) { v.failed.push({ said: entry.said, outcome: "failed-check" }); continue; }
-    const found = appearances(g.bytes, entry.said);
-    v.verified.push({ said: entry.said, contains: found.map((said) => { const p = paths(g.bytes, said); return { said, paths: p.paths, appearances: p.count }; }) });
-    for (const claimed of entry.refers) if (!found.includes(claimed)) v.notContained.push({ in: entry.said, said: claimed });
+    const found = appearances(g.bytes, entry.said).sort();   // lowest SAID first: the order the recording limits cut in
+    const kept = found.slice(0, Math.min(contained.perDefinition, Math.max(0, contained.perSource - recorded)));
+    recorded += kept.length;
+    v.omittedContained += found.length - kept.length;
+    v.verified.push({ said: entry.said, contains: kept.map((said) => { const p = paths(g.bytes, said); return { said, paths: p.paths, appearances: p.count }; }), omittedContained: found.length - kept.length });
+    for (const claimed of entry.refers) if (!found.includes(claimed)) v.notContained.push({ in: entry.said, said: claimed });   // against the full scan, not the cut
   }
   // The host's time or bytes went during this source: nothing of its definitions is kept; the document's digest is, for comparison.
   if (session.exhausted(host) !== null) return { ...empty(c), fetched: true, digest: v.digest, outcome: "timed-out" };
@@ -964,6 +1006,7 @@ export async function visitAll(c: Candidate, session: Session, robots: Robots): 
   v.introductions = document.introductions.slice(0, session.limits.introductionsPerSource);
   if (v.untried > 0) v.limits.push("definitions");
   if (document.introductions.length > v.introductions.length) v.limits.push("introductions");
+  if (v.omittedContained > 0) v.limits.push("contained");
   v.outcome = v.limits.length > 0 ? "truncated" : "ok";
   v.dropped = dropped;
   v.document = document;
@@ -995,7 +1038,7 @@ git commit -m "feat: the catalog's visit of a source: robots rule, every definit
 
 **Interfaces:**
 - Consumes: `levels`, `Candidate`, `visitAll`, `SourceVisit`, `Robots`, `Session`, `Unresolved`, `parseSourceAddress`, `RowLimits`, `ROW`, `CATALOG`, `PATH_LIMITS`, `PUBLICATION`, `byKey`, `isRecord`, `isSaid`, `asciiJson`.
-- Produces: `type CandidateFile = { finder: string; snapshot: string; candidates: { address: string; place: Record<string, string | number> }[] }`; `readCandidateFile(text: string): CandidateFile | null`; `type Found = { by: "from" } | { by: "introduction"; from: string } | { by: "finder"; finder: string; snapshot: string; place: Record<string, string | number> }`; `type Row = { said: string; serves: { source: string }[]; publications: { source: string; by?: string; publication: Publication }[]; referrers: { source: string; said: string; paths: string[]; appearances: number }[]; counts: { source: string; publications: number; referrers: number }[]; omittedSources?: number }`; `type BuildInput = { from: string[]; candidates: { file: CandidateFile; bytes: Uint8Array }[]; session: Session; robots: Robots; row: RowLimits; toolCommit: string | null }`; `type BuildOutcome = { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } } | { ok: false; problem: string }`; `buildCatalog(input: BuildInput): Promise<BuildOutcome>` (writes no pages; Task 6 adds them); `toolCommit(checkout: URL): string | null`.
+- Produces: `type CandidateFile = { finder: string; snapshot: string; candidates: { address: string; place: Record<string, string | number> }[] }`; `readCandidateFile(text: string): CandidateFile | null`; `type Found = { by: "from" } | { by: "introduction"; from: string } | { by: "finder"; finder: string; snapshot: string; place: Record<string, string | number> }`; `type Row = { said: string; serves: { source: string }[]; publications: { source: string; by?: string; publication: Publication }[]; referrers: { source: string; said: string; paths: string[]; appearances: number }[]; counts: { source: string; publications: number; referrers: number }[]; omittedSources?: number }`; `type BuildInput = { from: string[]; candidates: { file: CandidateFile; bytes: Uint8Array }[]; session: Session; robots: Robots; row: RowLimits; contained: ContainedLimits; toolCommit: string | null }`; `type BuildOutcome = { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } } | { ok: false; problem: string }`; `buildCatalog(input: BuildInput): Promise<BuildOutcome>` (writes no pages; Task 6 adds them); `toolCommit(checkout: URL): string | null`.
 
 **Acceptance Criteria:**
 - Candidates: `--from` addresses and candidate files' addresses are de-duplicated (canonical form) and visited in sorted order at depth 0; an address failing the rule is dropped and counted (`droppedCandidates`); more candidates than `sourcesPerRun` gives `{ ok: false, problem }` before any fetch; a candidate file whose `finder` or `snapshot` fails the name pattern is refused by `readCandidateFile`; each candidate file given is copied into the output at `candidates/<finder>/<snapshot>.json` byte for byte and `catalog.json` names the path; two candidate files that would land on one path (compared case-insensitively) refuse the build before any fetch; a `place` value that is not well-formed Unicode is dropped (Ruling 12).
@@ -1021,7 +1064,7 @@ import { readInputs } from "../src/inputs.ts";
 import { saidOf, FILL } from "../src/said.ts";
 import { Session } from "../src/session.ts";
 import { Robots } from "../src/robots.ts";
-import { CATALOG, ROW, PATH_LIMITS, PUBLICATION, type Limits, type RowLimits } from "../src/limits.ts";
+import { CATALOG, ROW, CONTAINED, PATH_LIMITS, PUBLICATION, type Limits, type RowLimits } from "../src/limits.ts";
 import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile, type Row } from "../src/catalog.ts";
 import { Origin } from "./helpers/servers.ts";
 
@@ -1032,7 +1075,7 @@ const robotsOk: NonNullable<Origin["behave"]> = (req, res) => { if (req.url === 
 const start = async () => { const o = await Origin.start(); o.behave = robotsOk; origins.push(o); return o; };
 after(async () => { for (const o of origins) await o.close(); });
 const session = (more: Partial<Limits> = {}) => new Session({ ...CATALOG, requestMs: 2000, ...more }, { test: true });
-const build = (from: string[], more: Partial<Limits> = {}, row: RowLimits = ROW, candidates: CandidateFile[] = []) => { const s = session(more); return buildCatalog({ from, candidates: candidates.map((file) => ({ file, bytes: new TextEncoder().encode(JSON.stringify(file)) })), session: s, robots: new Robots(s), row, toolCommit: "0123456789abcdef0123456789abcdef01234567" }); };
+const build = (from: string[], more: Partial<Limits> = {}, row: RowLimits = ROW, candidates: CandidateFile[] = []) => { const s = session(more); return buildCatalog({ from, candidates: candidates.map((file) => ({ file, bytes: new TextEncoder().encode(JSON.stringify(file)) })), session: s, robots: new Robots(s), row, contained: CONTAINED, toolCommit: "0123456789abcdef0123456789abcdef01234567" }); };
 const text = (files: Map<string, Uint8Array>, path: string) => new TextDecoder().decode(files.get(path)!);
 const json = (files: Map<string, Uint8Array>, path: string) => JSON.parse(text(files, path)) as Record<string, unknown>;
 const row = (files: Map<string, Uint8Array>, said: string) => json(files, `said/${said}.json`) as unknown as Row;
@@ -1060,13 +1103,13 @@ test("two sources that never link, named with --from, meet in one row; two build
   assert.deepEqual(index.saids.map((x) => x.said), [...index.saids.map((x) => x.said)].sort());
   const sources = json(r.files, "sources.json") as { sources: { address: string; found: unknown[]; outcome: string; limits: string[]; digest: string | null; definitions: unknown[]; untried: number; refers: unknown[] }[] };
   assert.deepEqual(sources.sources.map((s) => s.address), [aAddr, bAddr].sort());
-  for (const s of sources.sources) { assert.deepEqual(s.found, [{ by: "from" }]); assert.equal(s.outcome, "ok"); assert.deepEqual(s.limits, []); assert.match(s.digest!, /^[0-9a-f]{64}$/); assert.deepEqual(s.definitions, []); assert.equal(s.untried, 0); assert.deepEqual(s.refers, []); }
+  for (const s of sources.sources) { assert.deepEqual(s.found, [{ by: "from" }]); assert.equal(s.outcome, "ok"); assert.deepEqual(s.limits, []); assert.match(s.digest!, /^[0-9a-f]{64}$/); assert.deepEqual(s.definitions, []); assert.equal(s.untried, 0); assert.equal((s as { omittedContained: number }).omittedContained, 0); assert.deepEqual(s.refers, []); }
   const meta = json(r.files, "catalog.json") as Record<string, unknown>;
   assert.deepEqual(meta["from"], [aAddr, bAddr].sort());
   assert.equal(meta["seeded"], true);
   assert.equal(typeof meta["note"], "string");
   assert.deepEqual(meta["tool"], { commit: "0123456789abcdef0123456789abcdef01234567" });
-  assert.deepEqual(meta["limits"], { ...CATALOG, requestMs: 2000, paths: PATH_LIMITS, publication: PUBLICATION, row: ROW });
+  assert.deepEqual(meta["limits"], { ...CATALOG, requestMs: 2000, paths: PATH_LIMITS, publication: PUBLICATION, row: ROW, contained: CONTAINED });
   assert.deepEqual(meta["candidates"], []);
   const all = text(r.files, "catalog.json") + text(r.files, "sources.json");
   assert.ok(!/\d{4}-\d{2}-\d{2}T/.test(all), "no time anywhere");
@@ -1244,7 +1287,7 @@ import { levels, type Candidate } from "./crawl.ts";
 import { visitAll } from "./visit.ts";
 import { byKey, isRecord, type Publication } from "./source.ts";
 import { asciiJson } from "./json.ts";
-import { PATH_LIMITS, PUBLICATION, type RowLimits } from "./limits.ts";
+import { PATH_LIMITS, PUBLICATION, type RowLimits, type ContainedLimits } from "./limits.ts";
 import type { Session } from "./session.ts";
 import type { Robots } from "./robots.ts";
 
@@ -1265,7 +1308,7 @@ export type Row = {
   omittedSources?: number;
 };
 
-export type BuildInput = { from: string[]; candidates: { file: CandidateFile; bytes: Uint8Array }[]; session: Session; robots: Robots; row: RowLimits; toolCommit: string | null };
+export type BuildInput = { from: string[]; candidates: { file: CandidateFile; bytes: Uint8Array }[]; session: Session; robots: Robots; row: RowLimits; contained: ContainedLimits; toolCommit: string | null };
 export type BuildOutcome =
   | { ok: true; files: Map<string, Uint8Array>; summary: { rows: number; sources: { ok: number; truncated: number; other: number }; seeded: boolean } }
   | { ok: false; problem: string };
@@ -1322,7 +1365,7 @@ export function toolCommit(checkout: URL): string | null {
  * counts of addresses. Pages are added by the caller.
  */
 export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
-  const { session, robots, row } = input;
+  const { session, robots, row, contained } = input;
   const test = session.test;
   // 0. The copies: one file per path, on a case-insensitive file system too.
   const copyPaths = new Set<string>();
@@ -1346,7 +1389,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
   if (starts.length > session.limits.sourcesPerRun) return { ok: false, problem: `${starts.length} candidates, more than the limit of ${session.limits.sourcesPerRun} sources per run` };
 
   // 2. Visit. Every introducing source is recorded, not only the one whose chain reached a source first.
-  const { visits, skipped } = await levels(starts, session, (c) => visitAll(c, session, robots), () => false);
+  const { visits, skipped } = await levels(starts, session, (c) => visitAll(c, session, robots, contained), () => false);
   const tried = new Set<string>([...visits.map((v) => v.address), ...skipped.map((s) => s.address)]);
   const read = visits.filter((v) => v.read);
   for (const v of read) for (const i of v.introductions) if (tried.has(i.source)) found.set(i.source, [...(found.get(i.source) ?? []), { by: "introduction", from: v.address }]);
@@ -1392,6 +1435,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
         r = { ...r, serves: r.serves.filter((s) => kept.has(s.source)), publications: r.publications.filter((p) => kept.has(p.source)), referrers: r.referrers.filter((x) => kept.has(x.source)), counts: r.counts.filter((c) => kept.has(c.source)), omittedSources: omitted };
         bytes = jsonBytes(r);
       }
+      // Unreachable at the shipped limits (one source's share is about 215 KB: a publication, 50 referrers of 16 paths of 256 characters, a counts entry); the guard of the invariant for any other limits.
       if (bytes.length > row.rowBytes) return { ok: false, problem: `the row for ${said} from ${contributors[0]} alone is larger than the row limit` };
     }
     files.set(`said/${said}.json`, bytes);
@@ -1401,8 +1445,8 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
   const index = { saids: [...rows.keys()].sort().map((said) => { const r = rows.get(said)!; return { said, sources: servedBy.get(said)!, names: r.publications.map((p) => ({ name: p.publication.name, source: p.source })) }; }) };
   files.set("index.json", jsonBytes(index));
   const entries = [
-    ...visits.map((v) => ({ address: v.address, found: found.get(v.address) ?? [], outcome: v.outcome, limits: v.limits, dropped: v.dropped, digest: v.digest, definitions: v.failed, untried: v.untried, refers: v.notContained.map((n) => ({ in: n.in, said: n.said, outcome: "not-contained" })) })),
-    ...skipped.map((s) => ({ address: s.address, found: found.get(s.address) ?? [], outcome: "skipped", limits: s.limit !== undefined ? [s.limit] : [], dropped: { entries: 0, publications: 0 }, digest: null, definitions: [], untried: 0, refers: [] })),
+    ...visits.map((v) => ({ address: v.address, found: found.get(v.address) ?? [], outcome: v.outcome, limits: v.limits, dropped: v.dropped, digest: v.digest, definitions: v.failed, untried: v.untried, omittedContained: v.omittedContained, refers: v.notContained.map((n) => ({ in: n.in, said: n.said, outcome: "not-contained" })) })),
+    ...skipped.map((s) => ({ address: s.address, found: found.get(s.address) ?? [], outcome: "skipped", limits: s.limit !== undefined ? [s.limit] : [], dropped: { entries: 0, publications: 0 }, digest: null, definitions: [], untried: 0, omittedContained: 0, refers: [] })),
   ].sort(byKey("address"));
   files.set("sources.json", jsonBytes({ sources: entries }));
   const candidates = input.candidates.map(({ file, bytes }) => {
@@ -1416,7 +1460,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
     from: [...new Set(input.from.map((a) => parseSourceAddress(a, { test })?.address).filter((a): a is string => a !== undefined))].sort(),
     candidates,
     droppedCandidates,
-    limits: { ...session.limits, paths: PATH_LIMITS, publication: PUBLICATION, row },
+    limits: { ...session.limits, paths: PATH_LIMITS, publication: PUBLICATION, row, contained },
     seeded,
     ...(seeded ? { note: SEEDED_NOTE } : {}),
   }));
@@ -1446,10 +1490,11 @@ git commit -m "feat: the catalog build: candidates, rows, index, sources and the
 
 **Interfaces:**
 - Consumes: `escapeHtml`, `shell(title, stylesheet, body)`, `pageLink(said, fromIndex)`, `addressLink(address, text)`, `STYLE_CSS`, `offered(p, sourceBy)` from `src/pages.ts`; `parseSourceAddress`; `Row`; the sources' `pages` flags and bases (from `SourceVisit.document.pages` and `base`).
-- Produces: `type SourcePages = Map<string, { pages: boolean; base: string }>`; `catalogPages(rows: Row[], sources: SourcePages, opts: AddressOptions): Map<string, string>` with keys `pages/index.html`, `pages/style.css`, `pages/<SAID>/index.html`; `buildCatalog` adds them to its files.
+- Produces: `type SourcePages = Map<string, { pages: boolean; base: string }>`; `catalogPages(rows: Row[], sources: SourcePages, opts: AddressOptions, seeded: boolean): Map<string, string>` with keys `pages/index.html`, `pages/style.css`, `pages/<SAID>/index.html`; `buildCatalog` adds them to its files.
 
 **Acceptance Criteria:**
-- The index lists every row's SAID in SAID order with the names its publications give it (each beside its source address as text); each SAID links to its page through `pageLink`.
+- The index lists every row's SAID in SAID order with the names its publications give it (each beside its source address as text); each SAID links to its page through `pageLink`. When the build was seeded the index says so, above the list, in the design's words: "Built from a hand-kept list of sources, not from a finder: a seeded catalog, not a search over strangers." (stress test, branch 2); a build from candidate files says nothing there.
+- Every outbound link (to a source's page) carries `rel="noopener noreferrer"`; links within the output do not need it.
 - A SAID's page lists: the sources that serve it, each linked to `<base>pages/<SAID>/index.html` when that source's document says `pages: true` and shown as text otherwise; the publications (name, description, tags, collection, offered-by from the publication's or the source's stated `by`) each with its source address as text; the definitions that contain it, each linked to the serving source's page for that definition when that source has pages, with the paths and counts; the counts and `omittedSources` when present. No ranking, no form, no script; the CSP meta; every string through `escapeHtml`; a row keyed by anything but a SAID is refused.
 - A hostile publication (`</script><script>`, `javascript:alert(1)`, an attribute-shaped string, bidi controls) renders as text: the page parses to no element, attribute or link the writer did not emit, and every link target is a page in the output or a fixed path under an address that passed the rule.
 
@@ -1476,9 +1521,13 @@ const sources = new Map([[A, { pages: true, base: "https://a.example/mad/" }], [
 const links = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]!);
 const tags = (html: string) => [...html.matchAll(/<([a-zA-Z0-9]+)[\s>]/g)].map((m) => m[1]!.toLowerCase());
 
-test("the index lists rows in SAID order with names beside their source, linking each SAID to its page", () => {
-  const files = catalogPages(rows, sources, {});
+const SEEDED = "Built from a hand-kept list of sources, not from a finder: a seeded catalog, not a search over strangers.";
+
+test("the index lists rows in SAID order with names beside their source, linking each SAID to its page; a seeded build says so there", () => {
+  const files = catalogPages(rows, sources, {}, false);
   const index = files.get("pages/index.html")!;
+  assert.ok(!index.includes("hand-kept"), "a build from candidate files says nothing about seeding");
+  assert.ok(catalogPages(rows, sources, {}, true).get("pages/index.html")!.includes(SEEDED), "a seeded build says so on the index");
   assert.ok(index.indexOf(X) < index.indexOf(Y));
   assert.deepEqual(links(index).filter((l) => l !== "style.css"), [`${X}/index.html`, `${Y}/index.html`]);
   assert.ok(index.includes("&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;"), "the hostile name is text");
@@ -1487,7 +1536,7 @@ test("the index lists rows in SAID order with names beside their source, linking
 });
 
 test("a SAID's page links a serving source only when it has pages, shows publications and counts, and renders hostile text inert", () => {
-  const page = catalogPages(rows, sources, {}).get(`pages/${X}/index.html`)!;
+  const page = catalogPages(rows, sources, {}, true).get(`pages/${X}/index.html`)!;
   const hrefs = links(page);
   assert.ok(hrefs.includes(`https://a.example/mad/pages/${X}/index.html`), "A has pages: linked");
   assert.ok(!hrefs.some((h) => h.startsWith("https://b.example")), "B has no pages: shown as text only");
@@ -1502,10 +1551,12 @@ test("a SAID's page links a serving source only when it has pages, shows publica
   assert.ok(page.includes("&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"), "the attribute-shaped string is escaped text");
   assert.ok(page.includes("&#x202e;"), "the bidi control is a numeric reference");
   for (const h of hrefs) assert.ok(/^(\.\.\/(style\.css|index\.html)|\.\.\/E[A-P][A-Za-z0-9_-]{42}\/index\.html|https:\/\/a\.example\/mad\/pages\/E[A-P][A-Za-z0-9_-]{42}\/index\.html)$/.test(h), h);
+  for (const m of page.matchAll(/<a href="(https:[^"]*)"([^>]*)>/g)) assert.ok(m[2]!.includes('rel="noopener noreferrer"'), `an outbound link sends no Referer: ${m[1]}`);
   const allowed = new Set(["html", "head", "meta", "title", "link", "body", "header", "main", "footer", "h1", "h2", "p", "ul", "li", "a", "code", "section", "span"]);
   for (const t of tags(page)) assert.ok(allowed.has(t), `element ${t}`);
   assert.ok(page.includes(`content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'"`));
-  assert.throws(() => catalogPages([{ ...rows[1]!, said: "../../etc/passwd" }], sources, {}), /SAID/);
+  assert.ok(!page.includes("hand-kept"), "the seeded note is on the index only; a row says what sources say");
+  assert.throws(() => catalogPages([{ ...rows[1]!, said: "../../etc/passwd" }], sources, {}, false), /SAID/);
 });
 ```
 
@@ -1518,7 +1569,7 @@ Expected: FAIL, cannot find module `../src/catalogpages.ts`.
 
 - [ ] **Step 3: Export the guards from `src/pages.ts` and write `src/catalogpages.ts`**
 
-In `src/pages.ts`, add `export` to `shell`, `pageLink`, `addressLink`, `offered` and `STYLE_CSS` (no other change).
+In `src/pages.ts`, add `export` to `shell`, `pageLink`, `addressLink`, `offered` and `STYLE_CSS`, and make `addressLink` emit `rel="noopener noreferrer"` on the anchor it builds (stress test, branch 8: a click from a catalog page or a source page to a stranger's host sends no `Referer` and opens no window with a handle on ours): `return \`<a href="${escapeHtml(address)}" rel="noopener noreferrer">${escapeHtml(text)}</a>\`;`. If an existing test in `tests/pages.test.ts` asserts the anchor's exact markup, update that assertion to the new markup; the catalog pages test below asserts it for every outbound link.
 
 `src/catalogpages.ts`:
 
@@ -1556,17 +1607,21 @@ function rowPage(row: Row, sources: SourcePages, opts: AddressOptions): string {
   return shell(row.said, "../style.css", body);
 }
 
-function indexPage(rows: Row[]): string {
+/** docs/design.md: a seeded crawl says so in these words; a reader of the pages should see them where catalog.json is never read. */
+const SEEDED_NOTE = "Built from a hand-kept list of sources, not from a finder: a seeded catalog, not a search over strangers.";
+
+function indexPage(rows: Row[], seeded: boolean): string {
   const items = rows.map((r) => `<li>${pageLink(r.said, true)}${r.publications.map((p) => ` ${escapeHtml(p.publication.name)} <code>${escapeHtml(p.source)}</code>`).join("")}</li>`);
-  return shell("Definitions in this catalog", "style.css", `<header><h1>Definitions in this catalog</h1></header>\n<main><ul>${items.join("")}</ul></main>`);
+  const note = seeded ? `<p>${SEEDED_NOTE}</p>` : "";
+  return shell("Definitions in this catalog", "style.css", `<header><h1>Definitions in this catalog</h1>${note}</header>\n<main><ul>${items.join("")}</ul></main>`);
 }
 
 /** The catalog's pages: an index and a page per row, in SAID order, with the page writer's guards. A row keyed by anything but a SAID is refused. */
-export function catalogPages(rows: Row[], sources: SourcePages, opts: AddressOptions): Map<string, string> {
+export function catalogPages(rows: Row[], sources: SourcePages, opts: AddressOptions, seeded: boolean): Map<string, string> {
   const sorted = [...rows].sort((a, b) => (a.said < b.said ? -1 : a.said > b.said ? 1 : 0));
   for (const r of sorted) if (!isSaid(r.said)) throw new Error("a row is keyed by a SAID");
   const files = new Map<string, string>();
-  files.set("pages/index.html", indexPage(sorted));
+  files.set("pages/index.html", indexPage(sorted, seeded));
   files.set("pages/style.css", STYLE_CSS);
   for (const r of sorted) files.set(`pages/${r.said}/index.html`, rowPage(r, sources, opts));
   return files;
@@ -1575,7 +1630,7 @@ export function catalogPages(rows: Row[], sources: SourcePages, opts: AddressOpt
 
 The referrer line links the contained definition's SAID to its own row page in this catalog through `pageLink(r.said, false)` (every referrer SAID has a row: a referrer is a verified served definition), and its serving source's page for it through `sourceFor`. If `offered`'s output does not show the AID in a form the test's `page.includes("EKxyAID")` finds, it does show it somewhere as escaped text (that is what `offered` is for); keep the assertion on the AID's presence.
 
-In `src/catalog.ts`, before the `return { ok: true, ... }`: `const sourcePages: SourcePages = new Map(read.map((v) => [v.address, { pages: v.document!.pages === true, base: v.base! }]));` and `for (const [path, text] of catalogPages([...rows.values()], sourcePages, { test })) files.set(path, encoder.encode(text));` (import `catalogPages`, `type SourcePages` from `./catalogpages.ts`).
+In `src/catalog.ts`, before the `return { ok: true, ... }`: `const sourcePages: SourcePages = new Map(read.map((v) => [v.address, { pages: v.document!.pages === true, base: v.base! }]));` and `for (const [path, text] of catalogPages([...rows.values()], sourcePages, { test }, seeded)) files.set(path, encoder.encode(text));` (import `catalogPages`, `type SourcePages` from `./catalogpages.ts`; `seeded` is the constant step 5 computes for `catalog.json`, so the hookup goes after it).
 
 - [ ] **Step 4: Run the tests and the type check**
 
@@ -1744,7 +1799,7 @@ git commit -m "feat: who --catalog seeds the walk from a catalog's row, sampled 
 
 **Interfaces:**
 - Consumes: `buildCatalog`, `readCandidateFile`, `toolCommit`; `Robots`; `CATALOG`, `ROW`, `RowLimits`; `outDirProblem`, `writeFiles`; `parseCatalogAddress`.
-- Produces: `catalog build --out <folder> [--candidates <file>]... [--from <address>]...` ; `catalog find` refused with a usage note until step 6; `who --catalog <address>` wired to `walk`'s fourth argument; `RunOptions.row?: RowLimits` for tests; a `flags(args, name): string[]` helper.
+- Produces: `catalog build --out <folder> [--candidates <file>]... [--from <address>]...` ; `catalog find` refused with a usage note until step 6; `who --catalog <address>` wired to `walk`'s fourth argument; `RunOptions.row?: RowLimits` and `RunOptions.contained?: ContainedLimits` for tests; a `flags(args, name): string[]` helper.
 
 **Acceptance Criteria:**
 - `catalog build` requires `--out` (absent or empty, checked before any request) and at least one `--from` or `--candidates`; an unreadable or malformed candidate file is `{ problems }` exit 1 before any request; a `--from` failing the rule is a usage error (exit 2).
@@ -1832,7 +1887,7 @@ Expected: the new tests fail (`catalog` is not a command; `--catalog` is refused
 
 - [ ] **Step 3: Extend `src/cli.ts`**
 
-Add imports: `import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from "./catalog.ts"; import { Robots } from "./robots.ts";`, extend the limits import to `import { WALK, CATALOG, ROW, type Limits, type RowLimits } from "./limits.ts";` and the address import to include `parseCatalogAddress`. `RunOptions` gains `row?: RowLimits`. Add:
+Add imports: `import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from "./catalog.ts"; import { Robots } from "./robots.ts";`, extend the limits import to `import { WALK, CATALOG, ROW, CONTAINED, type Limits, type RowLimits, type ContainedLimits } from "./limits.ts";` and the address import to include `parseCatalogAddress`. `RunOptions` gains `row?: RowLimits` and `contained?: ContainedLimits`. Add:
 
 ```ts
 function flags(args: string[], name: string): string[] {
@@ -1877,7 +1932,7 @@ async function catalog(args: string[], io: Io, options: RunOptions): Promise<num
     candidates.push({ file, bytes });
   }
   const s = new Session(options.limits ?? CATALOG, { test: options.test, resolve: options.resolve });
-  const r = await buildCatalog({ from, candidates, session: s, robots: new Robots(s), row: options.row ?? ROW, toolCommit: toolCommit(new URL("../", import.meta.url)) });
+  const r = await buildCatalog({ from, candidates, session: s, robots: new Robots(s), row: options.row ?? ROW, contained: options.contained ?? CONTAINED, toolCommit: toolCommit(new URL("../", import.meta.url)) });
   if (!r.ok) { io.out(asciiJson({ problems: [r.problem] }) + "\n"); return 1; }
   writeFiles(r.files, out);
   io.out(asciiJson({ written: r.files.size, ...r.summary, from: from.length, candidates: candidates.length }) + "\n");
@@ -1934,6 +1989,18 @@ cd /Users/seriouscoderone/code/bpm && git add CLAUDE.md && git commit -m "docs: 
 
 ---
 
+### Closing step: one real-network build (stress test, branch 9)
+
+The controller's, after Task 9, not a subagent's. From this machine, once, read-only:
+
+```bash
+cd /Users/seriouscoderone/code/bpm/mad-discovery && node bin/mad-discovery.ts catalog build --out /private/tmp/claude-501/-Users-seriouscoderone-code-bpm/0df03f74-64d8-4f0b-9040-da278e74b62c/scratchpad/live-catalog --from https://mad.seriouscoder.one/source.json --from https://mad.josephleehunsaker.com/source.json
+```
+
+Expected: exit 0; the summary says two sources `ok`, 23 rows (the first source's definitions; the second serves one of them), `seeded: true`; `sources.json` lists both addresses as found `by: "from"` with digests and no failed definitions; `said/ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1.json` lists both addresses under `serves`; `pages/index.html` carries the seeded note; both hosts' `robots.txt` were read once each (they allow everything). Record the summary in the plan's "Executed" header. Nothing is deployed: hosting the maintainer's catalog is step 7.
+
+---
+
 ## Self-review
 
 **Spec coverage.** Design "The catalog": the two commands split (`catalog find` refused until step 6, `catalog build` here); the batch's four steps (Task 5: gather, Task 3+4: visit breadth-first, Task 4: fetch/check/scan, Task 5+6: write); the files and their contents (Task 5: `catalog.json` with tool commit, starting sources, finder/snapshot/count/path per candidate file, every limit; `index.json` counted before the cut; `said/<SAID>.json` with counts and the source's `by`; `sources.json` with every way found, outcome and limits, dropped counts, digest, non-verified definitions, untried count and refers; the copied candidate files; Task 6: pages); no file holds the catalog's address or a time, and every file is ASCII (Task 5 test). "What a catalog row may say": every bullet is a Task 5 test or rule (row only for verified served bytes; attribution; publications claimed and only in existing rows; counts are counts of addresses; one publication and 50 referrers per source with counts; 1 MB row with the omitted count over contributors only, never the first; how found checkable with every introducing address; no carry-over; empty build writes nothing; posting open). "Repeatable": fixed order and counts (Tasks 3, 5), byte-identical builds (Task 5 test). "Fetching safely", catalog column (Task 1) and the robots.txt rule (Task 2, applied in Task 4), `disallowed` and `refused-address` kept apart (Tasks 2, 4), both count limits recorded (Task 4). "The walk", `--catalog` (Task 7): row read beside `catalog.json` after the start, named introductions at depth 1 with the catalog as `via`, no per-source introductions limit for the row, sources-per-run applies, random sample with listed/taken, failure on the `catalog` member, catalogs named by sources never fetched. "Readable pages" for a catalog (Task 6): index and per-SAID pages, links only when the source says it has pages, a publication-only source by address, offered-by from the row's `by`, SAID order, no ranking or form, the guards including `pageLink`. "Tests", Catalog: identical builds; a source cannot create a row attributed to another; a SAID only contained has no file (the ghost, Task 5); a letter-case variant that still matches the pattern leaves the file unchanged (Task 5); over the definitions limit cut and reported (Task 4); thousands of publications of one SAID add one to its row (Task 5, 3,000); a row never exceeds the size a walk will read (Task 5, small limit); every source fails writes nothing (Task 5); a robots rule that disallows the tool is obeyed (Task 4). "Acceptance" clause 3 (from the index a person reaches each source's page for a SAID by links alone): Task 6's tests. Ruling 11: untouched in behaviour; `Session.fetch`'s signature absorbs it (Task 1, decision 10) and the catalog build's requests are shown to carry no `Origin` (Task 8). Ruling 12: Task 0 (publication fields, reported paths), Task 5 (`place` values; the wire case in its second test). Not here, by the design's own split: `catalog find` and both finders, the WARC fixture and the stranger-by-fixture test (step 6); hosting (step 7).
@@ -1943,3 +2010,37 @@ cd /Users/seriouscoderone/code/bpm && git add CLAUDE.md && git commit -m "docs: 
 **Placeholders.** `<bead id>` in commit messages is filled by the orchestrator. The row-size test's limits (400 and 100 bytes) were measured against this draft's row shape on the leaf fixture (2026-11-12). Task 0 names the scan's test file by its expected name and says what to do if it differs. Names the plan says to take from the existing file (`FROM_NOTE`, `flag`, the CSP string, `Exhausted`'s names) are read from the code, not invented. No other.
 
 **Type consistency.** `Candidate`, `Node` and `Extra` live in `crawl.ts` and `walk.ts` imports them; `Visited` extends `Node`; `levels`'s `extra` may return a promise and `nextLevel` takes the awaited list; `SourceVisit` extends `Node` and carries `outcome: Reason | "ok"` and `limits: string[]`, which `sources.json` writes as names only; `ReadSource.bytes` feeds the digest; `Row`, `Found`, `CandidateFile` are defined in `catalog.ts` and imported by `catalogpages.ts`, `cli.ts` and the tests; `BuildInput.candidates` carries the file and its text; `Session.fetch`'s second argument is `FetchMode = { type?: FetchType; asBrowser?: boolean }`; `Fetched`'s ok ending keeps Ruling 11's `anyOrigin` and its non-ok endings carry `status`; `RunOptions.row` is `RowLimits`; `asciiJson` lives in `json.ts` and is imported by `cli.ts`, `catalog.ts` and the cli test.
+
+## Stress Test Results: the catalog build plan (step 5)
+
+Run with the maintainer on 2026-11-12 (bead bpm-7h1.16), eleven branches, one added by the reflexion pass.
+
+### Resolved Decisions
+1. **Memory under a hostile source: modified.** The network limits bound what a build fetches, not what it keeps; a contained SAID's record with paths can be a hundred times its 44 bytes on the wire. Two count limits, `CONTAINED = { perDefinition: 200, perSource: 5_000 }`, cut lowest SAID first; the rest are counted (`omittedContained`) and the source is `truncated` with `contained`. The design's limits table gains the two rows.
+2. **The seeded note: modified.** `catalog.json`'s sentence is read by nobody who matters; the catalog's index page carries it when the build was seeded. Rows are unchanged.
+3. **robots.txt strictness: kept.** 5xx, no answer, a redirect or a 200 that is not `text/plain` means `disallowed`; one fetch routine with no redirects anywhere, and an unknown byte stream is not interpreted as rules. The outcome is named in `sources.json` for the host's operator.
+4. **The row-size failure: kept.** Unreachable at the shipped limits (one source's share of a row is about 215 KB against 1 MB); the arithmetic is in decision 4 and the code comment so a change to the limits re-checks it.
+5. **The random sample in `who --catalog`: kept** as the design says; a flooded row can occupy any fixed order.
+6. **The candidate-file copy: kept** byte for byte; step 6's finders write their files through `asciiJson`, so the copies are ASCII too.
+7. **The tool's commit: kept** as commit-or-null; the design now says local changes are not detected, so a builder builds from a clean checkout for the record to mean something.
+8. **Links to sources' pages: modified.** Kept as designed; `addressLink` emits `rel="noopener noreferrer"`, so a click to a stranger's host sends no `Referer` (source pages too).
+9. **The shared `main` and the live check: modified.** Execute now with the pull-before-each-task rule and the suite as judge of any merge; a closing step runs one read-only seeded build over both deployed sources and records the result.
+10. **Security and risk: pass.** Clarified on the way: "verified" is the byte check only (the bytes are what the SAID names; Ruling 8) and nothing in discovery is signed (Ruling 7). Residuals below.
+11. **The index files at scale (reflexion): kept.** `index.json`, `sources.json` and the index page have no cut: about 60 MB and 100 MB at the 500,000-row ceiling. Rows stay readable and a reader of a large catalog starts from a row; sharding is a later design change, tracked as bpm-odk.4 under the mad-discovery icebox.
+
+### Changes Made
+- Tasks 1, 4, 5, 8 and decision 12: `CONTAINED`, the cut in `visitAll`, `omittedContained` in `sources.json`, `limits.contained` in `catalog.json`, a visit test.
+- Task 6 and decision 13: the seeded note on the index page; `rel="noopener noreferrer"` on outbound links, asserted for every `https:` link.
+- The closing step after Task 9: one real-network seeded build.
+- Decision 4: the row-size arithmetic; decision 9: the finder-ASCII note for step 6.
+- `docs/design.md`: two limits rows; the commit note and the `candidates/` file in the files block; `sources.json`'s counts; the memory bound and the index ceiling under Repeatable; the seeded note and the `rel` rule under Readable pages.
+
+### Deferred / Parking Lot
+- Sharding the index files when a catalog nears the ceiling: bpm-odk.4 under the mad-discovery icebox.
+- `build` warning or `verify` reporting a lone surrogate inside a definition's own bytes: open for the maintainer on `github.com/seriouscoderone/mad-discovery/issues/1`.
+- Step 6: finders write candidate files through `asciiJson`.
+- Step 7: a wallet reads a catalog's files only when they are served as a source is (200, no redirect, `application/json`, the browser-wallet header, at most 1 MB); rows fit, the index files need not; a wallet starts from a row.
+
+### Confidence Assessment
+- Overall: High. Dry-run twice (169 tests, nothing beyond loopback), design-reviewed twice, eleven branches with the maintainer.
+- Areas of concern, accepted rather than closed: no run clock (about four hours worst case under hostile slow hosts); posting is open, so strangers' text appears under the catalog host's address (Ruling 6); a stranger's `pages: true` earns an outbound link to its host; the index ceiling.

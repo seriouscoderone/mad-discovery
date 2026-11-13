@@ -300,18 +300,23 @@ A catalog is made by two commands, so that reading a public input and fetching s
 A catalog is a folder, and its address is the address of its `catalog.json`. That is what a source lists under `catalogs` and what `--catalog` takes. The other files sit beside it under fixed names:
 
 ```
-catalog.json           how it was built: the tool's commit (read from the checkout it runs from), the
-                       starting sources, the finder and snapshot name of each candidate file, and
-                       the limits it ran with
+catalog.json           how it was built: the tool's commit (read from the checkout it runs from; local
+                       changes are not detected, so a builder who wants the record to mean something
+                       builds from a clean checkout), the starting sources, the finder and snapshot name
+                       of each candidate file, and the limits it ran with
+candidates/<finder>/<snapshot>.json
+                       each candidate file the build was given, the bytes as read, so another party can
+                       compare inputs; the names are the builder's own, pattern-bound, no leading dot
 index.json             every SAID that has a row, sorted; for each, the number of source addresses
                        that serve it and the names its publications give it, each beside the source
                        address that gave it
 said/<SAID>.json       one row: `said`, `serves`, `publications` and `referrers`, each entry as in the
                        walk's report without `via`. No `from`, `unresolved`, `catalogs` or `reached`
-sources.json           every address tried: how it was found, its outcome (with the limit's name when
-                       `truncated`), the counts of dropped entries, a hex Blake3 digest of the source
-                       document bytes read, and each definition or `refers` entry of that source that
-                       did not end `verified`, with its outcome
+sources.json           every address tried: how it was found, its outcome (with the names of the limits
+                       that cut it when `truncated`), the counts of dropped entries, of definitions
+                       beyond the cut and of contained SAIDs beyond the recording limits, a hex Blake3
+                       digest of the source document bytes read, and each fetched definition or `refers`
+                       entry of that source that did not end `verified`, with its outcome
 pages/index.html       the same rows as pages
 pages/<SAID>/index.html
 pages/style.css        the one stylesheet, as in a source
@@ -337,7 +342,7 @@ A catalog is built from documents written by strangers, so:
 
 ### Repeatable
 
-Repeatable means the same command over the same public inputs. Two parties who run it at the same time produce the same files if every source answered both alike. What a build includes is decided by counts and a fixed order, never by which answer arrived first: sources are taken breadth-first in the order given under [The walk](#the-walk), and every limit cuts in that order. A catalog build has no clock for the whole run, so its limits have to bound its length: sources per run, times the time for one host, divided by the hosts in flight, must fit the job that runs the build. With the proposed numbers that is about four hours. A build that cannot finish fails and writes nothing.
+Repeatable means the same command over the same public inputs. Two parties who run it at the same time produce the same files if every source answered both alike. What a build includes is decided by counts and a fixed order, never by which answer arrived first: sources are taken breadth-first in the order given under [The walk](#the-walk), and every limit cuts in that order. A catalog build has no clock for the whole run, so its limits have to bound its length: sources per run, times the time for one host, divided by the hosts in flight, must fit the job that runs the build. With the proposed numbers that is about four hours. A build that cannot finish fails and writes nothing. What a build keeps in memory is bounded too, not only what it fetches: a contained SAID's record with its paths can be a hundred times the SAID's 44 bytes on the wire, so the build records at most 200 contained SAIDs from one definition and 5,000 from one source (lowest SAID first) and counts the rest. The index files have no cut: at the ceiling of 500,000 rows `index.json` is about 60 MB and the index page about 100 MB, beyond what a browser opens or the walk's file limit reads, while every row stays under 1 MB. A reader of a large catalog starts from a row, as `--catalog` does; sharding the index is a later change to the layout, to be made when a catalog nears the ceiling.
 
 A source can answer two builders differently. `sources.json` records a digest of each source document as read, so two builds that differ can be compared source by source. A difference is information about that source, not evidence against either builder.
 
@@ -399,7 +404,7 @@ For each definition a source serves, the build writes one page at `pages/<SAID>/
 - the sources this source introduces for this SAID, shown by address and labelled as introductions;
 - the catalogs this source introduces, each linked to that catalog's page for this SAID.
 
-`pages/index.html` lists what the source serves, by the names its publications give. A definition with no publication is titled by its SAID. A catalog's pages show its rows the same way: an index, and a page per SAID. On that page a source that serves the SAID is linked to its own page for it, and a definition that contains the SAID is linked to its serving source's page for that definition, in both cases only when the source document says it has pages. A source that only carries a publication of the SAID is shown by address. The pages carry no order but SAID order, no ranking and no form.
+`pages/index.html` lists what the source serves, by the names its publications give. A definition with no publication is titled by its SAID. A catalog's pages show its rows the same way: an index, and a page per SAID. On that page a source that serves the SAID is linked to its own page for it, and a definition that contains the SAID is linked to its serving source's page for that definition, in both cases only when the source document says it has pages. A source that only carries a publication of the SAID is shown by address. When the build was seeded (a hand-kept list given on the command line, no finder) the catalog's index says so in those words, since `catalog.json` is read by nobody who matters. The pages carry no order but SAID order, no ranking and no form.
 
 **Shown text.** Everything a page says about a definition comes from the definition's bytes or from a publication, through one fixed template. The template's own words are its labels and the check command, the same on every page. The build composes no sentence, which is MAD's rule for shown text. This cut renders any JSON document generically. A renderer that knows MAD's kinds belongs with MAD's shared library (bpm-vfn.3).
 
@@ -408,6 +413,7 @@ For each definition a source serves, the build writes one page at `pages/<SAID>/
 - The page writer has one way to emit text, and it escapes `& < > " '`. It has no way to emit raw markup.
 - No string from a definition or a publication becomes an element name, an attribute name, an `id`, a `class`, a `style` or a link target. An address inside a definition is shown as text.
 - The only links are: to other pages in the same output folder by SAID, written relative to the page and naming `index.html`; to source and catalog addresses that passed the address rule; and to a fixed path under such an address, which the build forms from the address and a SAID that matched the pattern (`pages/<SAID>/index.html` under a source's base; `pages/<SAID>/index.html` or `said/<SAID>.json` beside a `catalog.json`).
+- Every link to another host carries `rel="noopener noreferrer"`: a click tells the stranger's host nothing about the page it came from and gives it no handle on the reader's window.
 - Pages contain no script. Each carries a Content-Security-Policy in a `<meta>` element (`default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'`), so the policy holds on hosts that cannot set headers.
 - Pages, a source's or a catalog's, are not served from an origin that also serves an application holding keys or drafts. MAD keeps its stores in the browser's localStorage, which any script on the same origin can read.
 
@@ -447,6 +453,8 @@ Limits. The rows are what must exist; the numbers are proposals for the maintain
 | JSON nesting depth of a source document, a catalog file, or a definition parsed for paths | 64 | 64 |
 | Paths reported for one definition | 16, each at most 256 characters | the same |
 | Definitions fetched from one source, taken in SAID order | 50 | 500 |
+| Contained SAIDs recorded from one definition, with their paths, lowest SAID first; the rest counted, not recorded | n/a: one SAID is asked | 200 |
+| Contained SAIDs recorded from one source, across its definitions | n/a | 5,000 |
 | Introductions followed from one source: the first listed in address order, visited or not | 10 | 10 |
 | Depth of introductions from a starting source | 3 | 3 |
 | Sources per run | 50 | 1,000 |
