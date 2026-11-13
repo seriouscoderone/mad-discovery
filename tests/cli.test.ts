@@ -9,7 +9,7 @@ import { main, type Io } from "../src/cli.ts";
 import { asciiJson } from "../src/json.ts";
 import { readInputs } from "../src/inputs.ts";
 import { saidOf } from "../src/said.ts";
-import { WALK } from "../src/limits.ts";
+import { WALK, CATALOG } from "../src/limits.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const bin = fileURLToPath(new URL("../bin/mad-discovery.ts", import.meta.url));
@@ -132,7 +132,7 @@ test("who prints the report and exits 0; a start that cannot be read exits 1; us
     assert.equal(await main(["who", SELECTION, "--from", deadAddr], c.io, local), 1);
     assert.deepEqual(c.json(), { said: SELECTION, from: deadAddr, problem: "the starting source could not be read: unreachable" });
 
-    for (const args of [["who"], ["who", "nope", "--from", address], ["who", SELECTION], ["who", SELECTION, "--from", `${a.origin}/mad/other.json`], ["who", SELECTION, "--from", address, "--catalog", "https://c.example/catalog.json"]]) {
+    for (const args of [["who"], ["who", "nope", "--from", address], ["who", SELECTION], ["who", SELECTION, "--from", `${a.origin}/mad/other.json`]]) {
       c = capture();
       assert.equal(await main(args, c.io, local), 2, args.join(" "));
       assert.equal(c.out(), "");
@@ -311,4 +311,66 @@ test("build at a host root writes and reports the AI Catalog file; under a path 
   assert.ok(existsSync(join(out, ".well-known", "ai-catalog.json")));
   const under = run("build", gymDir(), "--config", join(fixtures, "gym-config.json"), "--out", join(mkdtempSync(join(tmpdir(), "out-")), "site"));
   assert.equal(under.json.aiCatalog, null);
+});
+
+test("catalog build writes a catalog from --from sources and reports; usage and failures are named; its requests carry a walk's headers and no Origin", async () => {
+  const [a, b] = [await Origin.start(), await Origin.start()];
+  const headerNames: string[][] = [];
+  const robotsOk: NonNullable<Origin["behave"]> = (req, res) => { headerNames.push(Object.keys(req.headers).sort()); if (req.url === "/robots.txt") { res.setHeader("content-type", "text/plain"); res.end("User-agent: *\nDisallow:\n"); return true; } return false; };
+  a.behave = robotsOk; b.behave = robotsOk;
+  try {
+    const aAddr = a.source("mad/", { serve: [SELECTION] }, compactInputs).address;
+    const bAddr = b.source("mad/", { serve: [SELECTION] }, compactInputs).address;
+    const out = join(mkdtempSync(join(tmpdir(), "cat-")), "catalog");
+    let c = capture();
+    const catalogLocal = { ...local, limits: { ...CATALOG, requestMs: 2000 } };
+    assert.equal(await main(["catalog", "build", "--out", out, "--from", aAddr, "--from", bAddr], c.io, catalogLocal), 0, c.out());
+    const r = c.json();
+    assert.equal(r.rows, 12); assert.deepEqual(r.sources, { ok: 2, truncated: 0, other: 0 }); assert.equal(r.seeded, true); assert.equal(r.from, 2); assert.equal(r.candidates, 0);
+    assert.equal(r.written, 3 + 12 + 2 + 12, "catalog, index, sources; 12 rows; index page, style; 12 pages");
+    for (const f of ["catalog.json", "index.json", "sources.json", `said/${SELECTION}.json`, "pages/index.html", `pages/${SELECTION}/index.html`, "pages/style.css"]) assert.ok(existsSync(join(out, f)), f);
+    const meta = JSON.parse(readFileSync(join(out, "catalog.json"), "utf8")) as { tool: { commit: string | null } };
+    assert.match(meta.tool.commit!, /^[0-9a-f]{40}$/);
+    assert.ok(/^[\x20-\x7e\n]*$/.test(c.out()), "ASCII-only");
+    assert.ok(headerNames.length >= 4, "robots.txt, the document and the definitions were asked");
+    for (const names of headerNames) assert.deepEqual(names, ["accept", "accept-encoding", "connection", "host", "user-agent"]);
+
+    c = capture();
+    assert.equal(await main(["catalog", "build", "--out", out, "--from", aAddr], c.io, catalogLocal), 1, "the out folder is not empty now");
+    assert.deepEqual(c.json(), { problems: [`${out} is not empty`] });
+    const requests = a.requests.length;
+    for (const args of [["catalog"], ["catalog", "find", "--finder", "robots", "--out", out], ["catalog", "build", "--out", join(out, "x")], ["catalog", "build", "--out", join(out, "x"), "--from", "https://1.2.3.4/source.json"]]) {
+      c = capture();
+      assert.equal(await main(args, c.io, catalogLocal), 2, args.join(" "));
+      assert.equal(c.out(), "");
+    }
+    assert.equal(a.requests.length, requests, "usage errors fetch nothing");
+
+    const dead = await Origin.start(); const deadAddr = `${dead.origin}/mad/source.json`; await dead.close();
+    c = capture();
+    const out2 = join(mkdtempSync(join(tmpdir(), "cat-")), "catalog");
+    assert.equal(await main(["catalog", "build", "--out", out2, "--from", deadAddr], c.io, catalogLocal), 1);
+    assert.deepEqual(c.json(), { problems: ["no source could be read"] });
+    assert.ok(!existsSync(out2), "nothing written");
+
+    const bad = join(mkdtempSync(join(tmpdir(), "cand-")), "bad.json");
+    writeFileSync(bad, "{}");
+    c = capture();
+    assert.equal(await main(["catalog", "build", "--out", out2, "--candidates", bad], c.io, catalogLocal), 1);
+    assert.deepEqual(c.json(), { problems: [`${bad} is not a candidate file`] });
+  } finally { await a.close(); await b.close(); }
+});
+
+test("who --catalog passes the catalog through; a bad catalog address is a usage error", async () => {
+  const [a, cat] = [await Origin.start(), await Origin.start()];
+  try {
+    const { address } = a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    const catalogAddr = `${cat.origin}/c/catalog.json`;
+    cat.put(`c/said/${SELECTION}.json`, JSON.stringify({ said: SELECTION, serves: [{ source: address }] }));
+    let c = capture();
+    assert.equal(await main(["who", SELECTION, "--from", address, "--catalog", catalogAddr], c.io, local), 0);
+    assert.deepEqual(c.json().catalog, { address: catalogAddr, listed: 1, taken: 0 }, "the one listed source is the start, already visited");
+    c = capture();
+    assert.equal(await main(["who", SELECTION, "--from", address, "--catalog", "https://c.example/not-a-catalog.json"], c.io, local), 2);
+  } finally { await a.close(); await cat.close(); }
 });

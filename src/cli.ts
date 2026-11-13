@@ -3,32 +3,41 @@ import { isSaid, checkSaid, saidOf, replaceAll, FILL } from "./said.ts";
 import { parseConfig, ConfigError } from "./config.ts";
 import { readInputs } from "./inputs.ts";
 import { planBuild, writeFiles, outDirProblem, BuildError } from "./build.ts";
-import { parseHttpsAddress, parseSourceAddress } from "./address.ts";
+import { parseHttpsAddress, parseSourceAddress, parseCatalogAddress } from "./address.ts";
 import { Session } from "./session.ts";
-import { WALK, type Limits } from "./limits.ts";
+import { WALK, CATALOG, ROW, CONTAINED, type Limits, type RowLimits, type ContainedLimits } from "./limits.ts";
 import { walk } from "./walk.ts";
 import { get } from "./get.ts";
 import { redirectTarget } from "./read.ts";
 import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
+import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from "./catalog.ts";
+import { Robots } from "./robots.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
-/** test, resolve and limits exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
-export type RunOptions = { test?: boolean; resolve?: Resolve; limits?: Limits };
+/** test, resolve, limits, row and contained exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
+export type RunOptions = { test?: boolean; resolve?: Resolve; limits?: Limits; row?: RowLimits; contained?: ContainedLimits };
 
 const FROM_NOTE = "--from must be a source address: https, a DNS name, a path ending in /source.json.";
 
 const USAGE = `usage:
   mad-discovery build <folder> --config <file> --out <folder>
   mad-discovery verify <file or address> <SAID>
-  mad-discovery who <SAID> --from <source address>
+  mad-discovery who <SAID> --from <source address> [--catalog <catalog address>]
   mad-discovery get <SAID> --from <source address> --out <folder>
+  mad-discovery catalog build --out <folder> [--candidates <file>]... [--from <source address>]...
 Every command prints JSON on standard output. Exit 0: success. 1: failure. 2: usage.`;
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   const value = i >= 0 ? args[i + 1] : undefined;
   return value === undefined || value.startsWith("--") ? undefined : value;
+}
+
+function flags(args: string[], name: string): string[] {
+  const out: string[] = [];
+  args.forEach((a, i) => { const v = args[i + 1]; if (a === name && v !== undefined && !v.startsWith("--")) out.push(v); });
+  return out;
 }
 
 function usage(io: Io, note = ""): number {
@@ -44,6 +53,7 @@ export async function main(argv: string[], io: Io, options: RunOptions = {}): Pr
     if (command === "verify") return await verify(rest, io, options);
     if (command === "who") return await who(rest, io, options);
     if (command === "get") return await bringHome(rest, io, options);
+    if (command === "catalog") return await catalog(rest, io, options);
     return usage(io);
   } catch (e) {
     io.out(asciiJson({ problems: [e instanceof Error ? e.message : String(e)] }) + "\n");
@@ -119,13 +129,19 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
 }
 
 async function who(args: string[], io: Io, options: RunOptions): Promise<number> {
-  if (args.includes("--catalog")) return usage(io, "--catalog arrives with the catalog, the second epic.");
   const said = args[0];
   const from = flag(args, "--from");
   if (said === undefined || !isSaid(said) || from === undefined) return usage(io, "The SAID must match the pattern and --from is required.");
   const start = parseSourceAddress(from, { test: options.test });
   if (start === null) return usage(io, FROM_NOTE);
-  const r = await walk(said, start.address, session(options));
+  const catalogFlag = flag(args, "--catalog");
+  let catalogAddress: string | undefined;
+  if (args.includes("--catalog")) {
+    const parsed = catalogFlag === undefined ? null : parseCatalogAddress(catalogFlag, { test: options.test });
+    if (parsed === null) return usage(io, "--catalog must be a catalog address: https, a DNS name, a path ending in /catalog.json.");
+    catalogAddress = parsed.address;
+  }
+  const r = await walk(said, start.address, session(options), catalogAddress);
   if (!r.ok) {
     io.out(asciiJson({ said, from: start.address, problem: `the starting source could not be read: ${r.reason}`, ...(r.target !== undefined ? { target: r.target } : {}) }) + "\n");
     return 1;
@@ -147,5 +163,32 @@ async function bringHome(args: string[], io: Io, options: RunOptions): Promise<n
   if (!r.ok) { io.out(asciiJson({ said, from: start.address, problem: r.problem, unresolved: r.unresolved }) + "\n"); return 1; }
   writeFiles(r.files, out);
   io.out(asciiJson(r.result) + "\n");
+  return 0;
+}
+
+async function catalog(args: string[], io: Io, options: RunOptions): Promise<number> {
+  const [sub, ...rest] = args;
+  if (sub === "find") return usage(io, "catalog find arrives with the finders (step 6).");
+  if (sub !== "build") return usage(io);
+  const out = flag(rest, "--out");
+  const from = flags(rest, "--from");
+  const candidatePaths = flags(rest, "--candidates");
+  if (out === undefined || (from.length === 0 && candidatePaths.length === 0)) return usage(io, "catalog build needs --out and at least one --from or --candidates.");
+  for (const f of from) if (parseSourceAddress(f, { test: options.test }) === null) return usage(io, FROM_NOTE);
+  const outProblem = outDirProblem(out);
+  if (outProblem !== null) { io.out(asciiJson({ problems: [outProblem] }) + "\n"); return 1; }
+  const candidates: { file: CandidateFile; bytes: Uint8Array }[] = [];
+  for (const path of candidatePaths) {
+    let bytes: Uint8Array;
+    try { bytes = new Uint8Array(readFileSync(path)); } catch { io.out(asciiJson({ problems: [`cannot read ${path}`] }) + "\n"); return 1; }
+    const file = readCandidateFile(Buffer.from(bytes).toString("utf8"));
+    if (file === null) { io.out(asciiJson({ problems: [`${path} is not a candidate file`] }) + "\n"); return 1; }
+    candidates.push({ file, bytes });
+  }
+  const s = new Session(options.limits ?? CATALOG, { test: options.test, resolve: options.resolve });
+  const r = await buildCatalog({ from, candidates, session: s, robots: new Robots(s), row: options.row ?? ROW, contained: options.contained ?? CONTAINED, toolCommit: toolCommit(new URL("../", import.meta.url)) });
+  if (!r.ok) { io.out(asciiJson({ problems: [r.problem] }) + "\n"); return 1; }
+  writeFiles(r.files, out);
+  io.out(asciiJson({ written: r.files.size, ...r.summary, from: from.length, candidates: candidates.length }) + "\n");
   return 0;
 }
