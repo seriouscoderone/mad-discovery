@@ -32,6 +32,15 @@ test("longest match wins, Allow wins a tie, * and $ are understood, text after #
   assert.equal(allows(parseRobots("User-agent: *\nDisallow: /mad/\n"), "mad-discovery", "/%6Dad/source.json"), false, "a percent-encoded unreserved octet is the character (RFC 9309 2.2.2)");
   assert.equal(allows(parseRobots("User-agent: *\nDisallow: /%7Ejoe\n"), "mad-discovery", "/~joe/x"), false, "in the rule as well");
   assert.equal(allows(parseRobots("User-agent: *\nDisallow: /*x\n"), "mad-discovery", "/*ax"), false, "a * in the rule is the wildcard even where the path holds a literal * (RFC 9309 2.2.3)");
+  const cafe = "/caf" + String.fromCharCode(0xe9);
+  assert.equal(allows(parseRobots(`User-agent: *\nDisallow: ${cafe}\n`), "mad-discovery", new URL(`https://a.test${cafe}`).pathname), false, "a non-ASCII rule is percent-encoded as UTF-8 before comparison (RFC 9309 2.2.2)");
+});
+
+test("every group that names the product is combined into one (RFC 9309 2.2.1)", () => {
+  const rules = parseRobots("User-agent: mad-discovery\nDisallow: /a\n\nUser-agent: *\nDisallow: /c\n\nUser-agent: mad-discovery\nDisallow: /b\n");
+  assert.equal(allows(rules, "mad-discovery", "/a/x"), false);
+  assert.equal(allows(rules, "mad-discovery", "/b/x"), false, "the second group counts too");
+  assert.equal(allows(rules, "mad-discovery", "/c/x"), true, "the * group does not join the product's");
 });
 
 test("a hostile rule cannot stall the matcher, and oversize rules and groups are bounded", () => {
@@ -46,6 +55,28 @@ test("a hostile rule cannot stall the matcher, and oversize rules and groups are
   assert.equal(many.groups[0]!.rules.length, 1000);
   assert.equal(allows(many, "mad-discovery", "/p1499"), true, "beyond the thousandth rule, nothing is read");
   assert.equal(allows(many, "mad-discovery", "/p0999"), false);
+});
+
+test("the address judged is bounded by the address rule: the worst case at the cap is fast, and a refused address asks nothing", async () => {
+  const s = new Session({ ...WALK, requestMs: 5000 }, { test: true });
+  const o = await Origin.start();
+  try {
+    const rule = "/*" + "a".repeat(508) + "b";
+    o.behave = (req, res) => { if (req.url === "/robots.txt") { res.setHeader("content-type", "text/plain"); res.end("User-agent: *\n" + `Disallow: ${rule}\n`.repeat(1000)); return true; } return false; };
+    const robots = new Robots(s);
+    const atCap = `${o.origin}/` + "a".repeat(512 - o.origin.length - 1);
+    assert.equal(atCap.length, 512);
+    const t0 = performance.now();
+    assert.equal(await robots.allows(atCap), true);
+    const took = performance.now() - t0;
+    assert.ok(took < 2000, `took ${took} ms`);
+    const asked = o.requests.length;
+    assert.equal(await robots.allows(atCap + "a"), "refused-address", "over 512 characters");
+    assert.equal(await robots.allows("not an address"), "refused-address");
+    assert.equal(await robots.allows(`${o.origin}/mad/source.json?q=1`), "refused-address", "a query is refused by the address rule");
+    assert.equal(await new Robots(new Session({ ...WALK, requestMs: 5000 })).allows(`${o.origin}/mad/source.json`), "refused-address", "plain http without the test option");
+    assert.equal(o.requests.length, asked, "no request for a refused address");
+  } finally { await o.close(); }
 });
 
 test("one fetch per host; 4xx allows everything; 5xx, a redirect, no answer and a wrong type disallow the host; a refused address keeps its outcome", async () => {
@@ -63,6 +94,7 @@ test("one fetch per host; 4xx allows everything; 5xx, a redirect, no answer and 
       try {
         o.behave = (_req, res) => { res.statusCode = answer; if (answer === 302) res.setHeader("location", `${o.origin}/elsewhere`); res.end(); return true; };
         assert.equal(await new Robots(s).allows(`${o.origin}/mad/source.json`), expected, String(answer));
+        if (answer === 302) assert.deepEqual(o.requests, ["robots.txt"], "the redirect is not followed");
       } finally { await o.close(); }
     }
     const html = await Origin.start();

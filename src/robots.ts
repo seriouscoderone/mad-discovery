@@ -1,10 +1,11 @@
 import { Session } from "./session.ts";
+import { parseHttpsAddress } from "./address.ts";
 
-/** One group's rules, in file order. */
-export type RobotsRules = { groups: { agents: string[]; rules: { allow: boolean; path: string }[] }[] };
+/** One group's rules, in file order: path is normalized once here, length is the rule's raw length, which the longest match compares. */
+export type RobotsRules = { groups: { agents: string[]; rules: { allow: boolean; path: string; length: number }[] }[] };
 
 const MAX_RULE = 512;    // a longer rule path is ignored
-const MAX_RULES = 1000;  // per group
+const MAX_RULES = 1000;  // per group, and for the groups combined for one product
 
 /**
  * A robots.txt, read as RFC 9309 says: groups of User-agent lines followed by rules; text after # dropped; unknown lines ignored.
@@ -26,9 +27,9 @@ export function parseRobots(text: string): RobotsRules {
       current.agents.push(value.toLowerCase());
     } else if ((field === "allow" || field === "disallow") && current !== null) {
       collectingAgents = false;
-      if (field === "disallow" && value === "") continue;      // an empty Disallow allows everything
+      if (value === "") continue;      // an empty Disallow allows everything; an empty Allow says nothing
       if (value.length > MAX_RULE || current.rules.length >= MAX_RULES) continue;
-      current.rules.push({ allow: field === "allow", path: value });
+      current.rules.push({ allow: field === "allow", path: normalizePath(value), length: value.length });
     } else collectingAgents = false;
   }
   return { groups };
@@ -58,21 +59,36 @@ function matches(pattern: string, path: string): boolean {
   return j === p.length;                                 // the path is consumed: the pattern must be too
 }
 
-/** RFC 9309 2.2.2: a percent-encoded unreserved octet is the character; any other escape is compared upper-cased. */
-function normalizePath(s: string): string {
-  return s.replace(/%([0-9A-Fa-f]{2})/g, (m, hex: string) => { const c = String.fromCharCode(parseInt(hex, 16)); return /[A-Za-z0-9\-._~]/.test(c) ? c : m.toUpperCase(); });
+/** Each UTF-8 byte of a code point above US-ASCII, as an upper-case %XX. */
+function encodeNonAscii(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    if (ch.codePointAt(0)! <= 0x7f) { out += ch; continue; }
+    for (const b of Buffer.from(ch, "utf8")) out += "%" + b.toString(16).toUpperCase().padStart(2, "0");
+  }
+  return out;
 }
 
-/** Whether the rules allow this path for this product: the product's group, else the * group, else yes; longest match wins, Allow a tie. */
+/** RFC 9309 2.2.2: an octet outside US-ASCII is percent-encoded; a percent-encoded unreserved octet is the character; any other escape is compared upper-cased. */
+function normalizePath(s: string): string {
+  return encodeNonAscii(s).replace(/%([0-9A-Fa-f]{2})/g, (m, hex: string) => { const c = String.fromCharCode(parseInt(hex, 16)); return /[A-Za-z0-9\-._~]/.test(c) ? c : m.toUpperCase(); });
+}
+
+/**
+ * Whether the rules allow this path for this product: the product's groups, else the * groups, else yes, every matching group's
+ * rules combined into one (RFC 9309 2.2.1, capped at 1,000 rules); longest match wins, Allow a tie.
+ */
 export function allows(rules: RobotsRules, product: string, path: string): boolean {
   const token = productToken(product);
-  const group = rules.groups.find((g) => g.agents.some((a) => productToken(a) === token)) ?? rules.groups.find((g) => g.agents.includes("*"));
-  if (group === undefined) return true;
+  let groups = rules.groups.filter((g) => g.agents.some((a) => productToken(a) === token));
+  if (groups.length === 0) groups = rules.groups.filter((g) => g.agents.includes("*"));
+  if (groups.length === 0) return true;
+  const combined = groups.flatMap((g) => g.rules).slice(0, MAX_RULES);
   const target = normalizePath(path);
   let best: { allow: boolean; length: number } | null = null;
-  for (const rule of group.rules) {
-    if (!matches(normalizePath(rule.path), target)) continue;
-    const length = rule.path.length;
+  for (const rule of combined) {
+    if (!matches(rule.path, target)) continue;
+    const length = rule.length;
     if (best === null || length > best.length || (length === best.length && rule.allow && !best.allow)) best = { allow: rule.allow, length };
   }
   return best === null ? true : best.allow;
@@ -97,7 +113,9 @@ export class Robots {
         if (f.outcome === "not-found") return "allow-all";
         if (f.outcome === "invalid" && f.status !== undefined && f.status >= 400 && f.status < 500) return "allow-all";   // another 4xx: no restrictions
         if (f.outcome === "refused-address") return "refused-address";
-        return "disallowed";   // 5xx, no answer, timed out, a redirect, or a 200 that is not a readable text/plain file
+        // 5xx, no answer, timed out, a redirect, or a 200 that is not a readable text/plain file. A host whose session budget
+        // was already spent lands here too: it is timed-out without a request.
+        return "disallowed";
       });
       this.hosts.set(origin, p);
     }
@@ -106,7 +124,10 @@ export class Robots {
 
   /** true or false by the host's rules for this address's path; "disallowed" when the file could not be read; "refused-address" when the address was. */
   async allows(address: string): Promise<true | false | "disallowed" | "refused-address"> {
-    const url = new URL(address);
+    // The address rule bounds the path the matcher walks (512 characters): an address it refuses is never judged or asked about.
+    const href = parseHttpsAddress(address, { test: this.session.test });
+    if (href === null) return "refused-address";
+    const url = new URL(href);
     const rules = await this.rulesFor(url.origin);
     if (rules === "disallowed" || rules === "refused-address") return rules;
     if (rules === "allow-all") return true;
