@@ -402,3 +402,48 @@ test("a source with one bad entry is listed without by or oobi, and its drop is 
   assert.deepEqual(r.report.sources, [{ address, via: [] }]);
   assert.deepEqual(r.report.dropped, [{ source: address, entries: 1, publications: 0 }]);
 });
+
+test("--catalog seeds depth 1 from the row, as named introductions with the catalog as via", async () => {
+  const [a, b, c, cat] = [await start(), await start(), await start(), await start()];
+  const [aAddr, bAddr, cAddr] = [a, b, c].map((o) => `${o.origin}/mad/source.json`);
+  for (const o of [b, c]) o.source("mad/", { serve: [SELECTION] }, inputs);
+  const catalogAddr = `${cat.origin}/cat/catalog.json`;
+  a.source("mad/", { serve: [SELECTION], catalogs: [catalogAddr] }, inputs);
+  cat.put("cat/catalog.json", JSON.stringify({ tool: { commit: null } }));
+  cat.put(`cat/said/${SELECTION}.json`, JSON.stringify({ said: SELECTION, serves: [{ source: cAddr }, { source: bAddr }, { source: "https://1.2.3.4/source.json" }], publications: [], referrers: [], counts: [] }));
+  const r = await walk(SELECTION, aAddr, session(), catalogAddr);
+  assert.ok(r.ok); if (!r.ok) return;
+  assert.deepEqual(r.report.serves.map((s) => s.source).sort(), [aAddr, bAddr, cAddr].sort());
+  for (const s of r.report.serves.filter((s) => s.source !== aAddr)) assert.deepEqual(s.via, [catalogAddr]);
+  assert.deepEqual(r.report.catalog, { address: catalogAddr, listed: 3, taken: 2 }, "the IP-literal address fails the rule and is not taken");
+  assert.deepEqual(r.report.unresolved, []);
+  assert.deepEqual(r.report.catalogs, [catalogAddr], "named by a's document; the row was fetched because --catalog said so, not on a's word");
+  assert.equal(cat.requests.filter((p) => p === "cat/catalog.json").length, 0, "catalog.json itself is never fetched");
+});
+
+test("--catalog: a row that cannot be read is reported on the catalog member; a large row is sampled to the room; nothing is read when the start fails", async () => {
+  const a = await start();
+  const cat = await start();
+  const { address: aAddr } = a.source("mad/", { serve: [SELECTION] }, inputs);
+  const catalogAddr = `${cat.origin}/cat/catalog.json`;
+  const r = await walk(SELECTION, aAddr, session(), catalogAddr);
+  assert.ok(r.ok); if (!r.ok) return;
+  assert.deepEqual(r.report.unresolved, [], "unresolved holds source addresses only");
+  assert.deepEqual(r.report.catalog, { address: catalogAddr, listed: 0, taken: 0, reason: "not-found" });
+
+  const dead = await Origin.start(); const deadBase = dead.origin; await dead.close();
+  const many = Array.from({ length: 20 }, (_, i) => `${deadBase}/s${i}/source.json`);
+  cat.put(`cat/said/${SELECTION}.json`, JSON.stringify({ said: SELECTION, serves: many.map((source) => ({ source })) }));
+  const r2 = await walk(SELECTION, aAddr, session({ sourcesPerRun: 6 }), catalogAddr);
+  assert.ok(r2.ok); if (!r2.ok) return;
+  assert.deepEqual(r2.report.catalog, { address: catalogAddr, listed: 20, taken: 5 });
+  const tried = r2.report.unresolved.filter((u) => u.reason === "unreachable").map((u) => u.address);
+  assert.equal(tried.length, 5);
+  assert.ok(tried.every((t) => many.includes(t)));
+  assert.equal(r2.report.unresolved.filter((u) => u.reason === "skipped").length, 0, "sampling, not skipping: nothing beyond the sample is listed");
+
+  const before = cat.requests.length;
+  const r3 = await walk(SELECTION, `${deadBase}/mad/source.json`, session(), catalogAddr);
+  assert.ok(!r3.ok);
+  assert.equal(cat.requests.length, before, "the row is not read when the start could not be");
+});

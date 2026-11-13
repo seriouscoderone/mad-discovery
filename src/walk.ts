@@ -1,11 +1,12 @@
-import { checkSaid } from "./said.ts";
-import { paths } from "./scan.ts";
-import { definitionAddress } from "./address.ts";
+import { randomInt } from "node:crypto";
+import { checkSaid, isSaid } from "./said.ts";
+import { paths, parseBounded } from "./scan.ts";
+import { definitionAddress, parseCatalogAddress, parseSourceAddress } from "./address.ts";
 import { readSource, redirectTarget, type Reason, type Unresolved } from "./read.ts";
 import { Session } from "./session.ts";
 import type { Dropped } from "./document.ts";
-import type { Publication } from "./source.ts";
-import { levels, type Candidate, type Node } from "./crawl.ts";
+import { isRecord, type Publication } from "./source.ts";
+import { levels, type Candidate, type Extra, type Node } from "./crawl.ts";
 
 export type Report = {
   said: string;
@@ -18,6 +19,7 @@ export type Report = {
   dropped: { source: string; entries: number; publications: number }[];
   catalogs: string[];
   reached: number;
+  catalog?: { address: string; listed: number; taken: number; reason?: Reason; target?: string };
 };
 
 /** Everything one visit found; merged into the report once the depth is complete. */
@@ -99,16 +101,59 @@ function assemble(said: string, from: string, visits: Visited[], skipped: Unreso
   };
 }
 
+type RowRead = { addresses: string[]; listed: number } | { reason: Reason; target?: string };
+
+/** The row's source addresses, each one that passes the rule; or why the row could not be read. */
+async function readRow(catalog: string, said: string, session: Session): Promise<RowRead> {
+  if (!isSaid(said)) throw new Error("only a SAID names a row");
+  const parsed = parseCatalogAddress(catalog, { test: session.test });
+  if (parsed === null) return { reason: "refused-address" };
+  const f = await session.fetch(`${parsed.base}said/${said}.json`);
+  if (f.outcome !== "ok") return { reason: f.outcome, ...redirectTarget(f) };
+  const row = parseBounded(f.bytes);
+  if (!row.ok || !isRecord(row.value) || !Array.isArray(row.value["serves"])) return { reason: "invalid" };
+  const addresses: string[] = [];
+  for (const s of row.value["serves"]) {
+    const a = isRecord(s) && typeof s["source"] === "string" ? parseSourceAddress(s["source"], { test: session.test }) : null;
+    if (a !== null && !addresses.includes(a.address)) addresses.push(a.address);
+  }
+  return { addresses: addresses.sort(), listed: row.value["serves"].length };
+}
+
+/** A random sample of n, in address order; the row is open to flooding and any fixed order can be occupied. */
+function sample(addresses: string[], n: number): string[] {
+  const pool = [...addresses];
+  const picked: string[] = [];
+  while (picked.length < n && pool.length > 0) picked.push(pool.splice(randomInt(pool.length), 1)[0]!);
+  return picked.sort();
+}
+
 /**
  * docs/design.md "The walk": breadth-first, every source at one depth before any at the next; within a depth the sources run under
  * the session's host scheduling and are merged in address order, so the report does not depend on who answered first.
  */
-export async function walk(said: string, from: string, session: Session): Promise<WalkOutcome> {
-  const { visits, skipped } = await levels([{ address: from, via: [], named: false }], session, (c) => visitSource(said, c, session), (i) => i.for.includes(said));
+export async function walk(said: string, from: string, session: Session, catalog?: string): Promise<WalkOutcome> {
+  let seeded: Report["catalog"];
+  // The row is read after the start, inside the driver's first level, so that a start that cannot be read costs the catalog nothing.
+  const extraLists = async (depth: number, here: Visited[]): Promise<Extra[]> => {
+    if (catalog === undefined || depth !== 0 || !here[0]!.fetched) return [];
+    const row = await readRow(catalog, said, session);
+    if ("reason" in row) { seeded = { address: catalog, listed: 0, taken: 0, reason: row.reason, ...(row.target !== undefined ? { target: row.target } : {}) }; return []; }
+    const room = Math.max(0, session.limits.sourcesPerRun - 1);
+    const chosen = row.addresses.length > room ? sample(row.addresses, room) : row.addresses;
+    seeded = { address: catalog, listed: row.listed, taken: 0 };
+    return [{ key: catalog, candidates: chosen.map((address) => ({ address, via: [catalog], named: true })) }];
+  };
+  const { visits, skipped } = await levels([{ address: from, via: [], named: false }], session, (c) => visitSource(said, c, session), (i) => i.for.includes(said), extraLists);
   const start = visits[0]!;
   if (!start.fetched) {
     const u = start.unresolved[0]!;
     return { ok: false, reason: u.reason, ...(u.target !== undefined ? { target: u.target } : {}) };
   }
-  return { ok: true, report: assemble(said, from, visits, skipped) };
+  const report = assemble(said, from, visits, skipped);
+  if (seeded !== undefined) {
+    if (seeded.reason === undefined) seeded.taken = visits.filter((v) => v.via.length === 1 && v.via[0] === catalog).length;
+    report.catalog = seeded;
+  }
+  return { ok: true, report };
 }
