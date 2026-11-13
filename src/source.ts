@@ -18,11 +18,13 @@ export type SourceDocument = {
   catalogs: string[];
 };
 
-// C0 and C1 control characters, which must not reach a terminal or a page.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+// Refused in a stranger's string, like a control character (Rulings 12 and 13): the C0 and C1 controls, which must not reach a terminal
+// or a page; the bidirectional controls, which reverse displayed text; and the format characters that do not show, which make two
+// names look alike. The joiners U+200C and U+200D stay: emoji sequences and Persian need them.
+const FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]|[\u{e0000}-\u{e007f}]/u;
 
-function hasControlCharacters(s: string): boolean {
-  return CONTROL.test(s);
+function hasForbiddenCharacters(s: string): boolean {
+  return FORBIDDEN.test(s);
 }
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -41,7 +43,8 @@ export function validatePublication(value: unknown): { ok: true; publication: Pu
     const v = value[k];
     if (typeof v !== "string") return { problem: `${k} is not a string` };
     if (v.length > max) return { problem: `${k} is longer than ${max} characters` };
-    if (hasControlCharacters(v)) return { problem: `${k} holds a control character` };
+    if (hasForbiddenCharacters(v)) return { problem: `${k} holds a control or format character` };
+    if (!v.isWellFormed()) return { problem: `${k} is not well-formed Unicode` };
     return v;
   };
   const target = value["target"]; if (typeof target !== "string" || !isSaid(target)) return { ok: false, problem: "target is not a SAID" };
@@ -50,7 +53,7 @@ export function validatePublication(value: unknown): { ok: true; publication: Pu
   const collection = text("collection", PUBLICATION.collection); if (typeof collection !== "string") return { ok: false, problem: collection.problem };
   const tags = value["tags"];
   if (!Array.isArray(tags) || tags.length > PUBLICATION.tags) return { ok: false, problem: `tags is not a list of at most ${PUBLICATION.tags}` };
-  for (const [i, t] of tags.entries()) if (typeof t !== "string" || t.length > PUBLICATION.tag || hasControlCharacters(t)) return { ok: false, problem: `tags[${i}] is not a string of at most ${PUBLICATION.tag} characters without control characters` };
+  for (const [i, t] of tags.entries()) if (typeof t !== "string" || t.length > PUBLICATION.tag || hasForbiddenCharacters(t) || !t.isWellFormed()) return { ok: false, problem: `tags[${i}] is not a string of at most ${PUBLICATION.tag} characters of well-formed Unicode without control or format characters` };
   const publication: Publication = { target, name, description, tags: tags as string[], collection };
   if (value["by"] !== undefined) {
     if (typeof value["by"] !== "string" || !AID_PATTERN.test(value["by"])) return { ok: false, problem: "by is not an AID" };

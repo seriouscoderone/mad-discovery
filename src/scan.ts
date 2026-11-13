@@ -93,7 +93,8 @@ export function paths(bytes: Uint8Array, said: string): { parsed: boolean; count
         pointer = `${top.pointer}/${top.key}`;
       } else pointer = valuePointer();
       while (k < count && occs[k]!.at + 44 <= end) {
-        if (occs[k]!.at >= i && pointer.length <= PATH_LIMITS.maxLength && out.length < PATH_LIMITS.maxPaths) out.push(pointer);
+        // A pointer is text a catalog writes: one whose key is not well-formed Unicode is left out (Ruling 12).
+        if (occs[k]!.at >= i && pointer.length <= PATH_LIMITS.maxLength && pointer.isWellFormed() && out.length < PATH_LIMITS.maxPaths) out.push(pointer);
         k++;
       }
       i = end;

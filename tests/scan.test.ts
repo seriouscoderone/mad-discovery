@@ -54,3 +54,12 @@ test("paths: too deep or not JSON gives the count and no paths", () => {
   assert.deepEqual(paths(bytes(deep), s), { parsed: false, count: 1, paths: [] });
   assert.deepEqual(paths(bytes(`(define ${s})`), s), { parsed: false, count: 1, paths: [] });
 });
+
+test("a pointer whose key is not well-formed Unicode is not reported; the occurrence is still counted (Ruling 12)", () => {
+  const lone = String.fromCharCode(0xd83d);
+  const encoded = new TextEncoder().encode(JSON.stringify({ d: PAID, [lone]: PAYMENT_RECEIVED, fine: PAYMENT_RECEIVED }));   // JSON.stringify writes the lone surrogate as \ud83d
+  const r = paths(encoded, PAYMENT_RECEIVED);
+  assert.equal(r.parsed, true);
+  assert.equal(r.count, 2);
+  assert.deepEqual(r.paths, ["/fine"], "the ill-formed key's pointer is left out");
+});
