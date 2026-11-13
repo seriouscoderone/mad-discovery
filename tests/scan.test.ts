@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { appearances, paths } from "../src/scan.ts";
+import { appearances, paths, illFormedStrings } from "../src/scan.ts";
 import { PATH_LIMITS } from "../src/limits.ts";
 
 const PAID = "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U";
@@ -62,4 +62,19 @@ test("a pointer whose key is not well-formed Unicode is not reported; the occurr
   assert.equal(r.parsed, true);
   assert.equal(r.count, 2);
   assert.deepEqual(r.paths, ["/fine"], "the ill-formed key's pointer is left out");
+});
+
+test("illFormedStrings counts every string, key or value, that is not well-formed Unicode, nested in arrays and objects (Ruling 12)", () => {
+  const lone = String.fromCharCode(0xd83d);
+  const doc = { d: PAID, [lone]: 1, k: "a" + lone, list: ["fine", [lone, { [`x${lone}`]: lone }]], n: null, t: true, f: 1.5 };
+  assert.deepEqual(illFormedStrings(new TextEncoder().encode(JSON.stringify(doc))), { parsed: true, count: 5 });
+  assert.deepEqual(illFormedStrings(new TextEncoder().encode(JSON.stringify(lone))), { parsed: true, count: 1 }, "a bare string");
+});
+
+test("illFormedStrings: a proper pair and non-ASCII letters are well-formed; bytes that are not JSON do not parse", () => {
+  const fine = { [String.fromCodePoint(0x1f600)]: "caf" + String.fromCharCode(0xe9) + String.fromCodePoint(0x1f600), list: [String.fromCharCode(0x4e2d)] };
+  assert.deepEqual(illFormedStrings(new TextEncoder().encode(JSON.stringify(fine))), { parsed: true, count: 0 });
+  assert.deepEqual(illFormedStrings(paid), { parsed: true, count: 0 });
+  assert.deepEqual(illFormedStrings(bytes("(define x)")), { parsed: false, count: 0 });
+  assert.deepEqual(illFormedStrings(bytes("[".repeat(100) + "]".repeat(100))), { parsed: false, count: 0 }, "too deep");
 });

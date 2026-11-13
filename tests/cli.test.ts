@@ -38,6 +38,7 @@ test("build writes a source and reports", () => {
   assert.ok(/^[\x20-\x7e\n]*$/.test(r.out), "ASCII-only output");
   assert.equal(readdirSync(join(out, "definitions")).length, 26);
   assert.ok(!("refused" in r.json), "a refusal exits 1, so success carries no refused list");
+  assert.ok(!("warnings" in r.json), "well-formed inputs give no warnings");
 });
 
 test("build refuses and writes nothing", () => {
@@ -415,4 +416,44 @@ test("verify over a source document address: readable as a source exits 0 and re
     assert.ok(c.err().includes("The SAID is required"));
     assert.equal(a.requests.length, requests, "usage errors fetch nothing");
   } finally { a.behave = null; await a.close(); }
+});
+
+/** A definition whose key and value each hold a lone surrogate, written by JSON.stringify as the six-character escape. */
+const loneShape = (said: string) => JSON.stringify({ d: said, [String.fromCharCode(0xd83d)]: "v" + String.fromCharCode(0xdc00) });
+const LONE = saidOf(new TextEncoder().encode(loneShape("#".repeat(44))));
+
+test("verify of a definition that holds lone surrogates reports wellFormed: false and the count; the exit status is unchanged (Ruling 12)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "lone-"));
+  const file = join(dir, `${LONE}.json`);
+  writeFileSync(file, loneShape(LONE));
+  let r = run("verify", file, LONE);
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.json, { verified: true, said: LONE, bytes: loneShape(LONE).length, wellFormed: false, illFormed: 2 });
+  const tampered = join(dir, "tampered.json");
+  writeFileSync(tampered, loneShape(LONE).replace('"v', '"w'));
+  r = run("verify", tampered, LONE);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.verified, false);
+  assert.equal(r.json.wellFormed, false);
+  assert.equal(r.json.illFormed, 2);
+  const a = await Origin.start();
+  try {
+    a.put(`mad/definitions/${LONE}.json`, loneShape(LONE));
+    const address = `${a.origin}/mad/definitions/${LONE}.json`;
+    const c = capture();
+    assert.equal(await main(["verify", address, LONE], c.io, local), 0);
+    assert.deepEqual(c.json(), { verified: true, said: LONE, address, bytes: loneShape(LONE).length, browserWallets: CANNOT_READ, wellFormed: false, illFormed: 2 });
+  } finally { await a.close(); }
+});
+
+test("build warns about inputs that hold lone surrogates and writes them unchanged (Ruling 12)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lone-in-"));
+  writeFileSync(join(dir, `${LONE}.json`), loneShape(LONE));
+  const config = join(mkdtempSync(join(tmpdir(), "cfg-")), "c.json");
+  writeFileSync(config, JSON.stringify({ source: "https://lone.example/mad/source.json", serve: [LONE] }));
+  const out = join(mkdtempSync(join(tmpdir(), "out-")), "site");
+  const r = run("build", dir, "--config", config, "--out", out);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.deepEqual(r.json.warnings, [{ said: LONE, illFormed: 2 }]);
+  assert.deepEqual(readFileSync(join(out, "definitions", `${LONE}.json`)), readFileSync(join(dir, `${LONE}.json`)), "the bytes as given");
 });

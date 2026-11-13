@@ -14,6 +14,7 @@ import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
 import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from "./catalog.ts";
 import { Robots } from "./robots.ts";
+import { illFormedStrings } from "./scan.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
 /** test, resolve and limits exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
@@ -83,6 +84,8 @@ function build(args: string[], io: Io): number {
     if (problems.length > 0) { io.out(asciiJson({ problems }) + "\n"); return 1; }
     const plan = planBuild(inputs, config);
     writeFiles(plan.files, out);
+    // Ruling 12's amendment: the definitions served, sorted by SAID, that hold a lone surrogate; written as given all the same.
+    const warnings = plan.document.serves.map((s) => ({ said: s.said, illFormed: illFormedStrings(inputs.get(s.said)!).count })).filter((w) => w.illFormed > 0);
     io.out(asciiJson({
       written: plan.files.size,
       serves: plan.document.serves.map((s) => s.said),
@@ -90,6 +93,7 @@ function build(args: string[], io: Io): number {
       robots: plan.robotsLine,
       sitemap: plan.sitemapLine,
       aiCatalog: plan.aiCatalog,
+      ...(warnings.length > 0 ? { warnings } : {}),
     }) + "\n");
     return 0;
   } catch (e) {
@@ -97,6 +101,12 @@ function build(args: string[], io: Io): number {
     io.out(asciiJson({ problems: [...problems, ...more] }) + "\n");
     return 1;
   }
+}
+
+/** Ruling 12's amendment: a definition holding a lone surrogate is reported, never refused; a well-formed or non-JSON one adds nothing. */
+function illFormed(bytes: Uint8Array): { wellFormed?: false; illFormed?: number } {
+  const r = illFormedStrings(bytes);
+  return r.parsed && r.count > 0 ? { wellFormed: false, illFormed: r.count } : {};
 }
 
 const isAddress = (s: string): boolean => /^https?:\/\//i.test(s);
@@ -134,14 +144,15 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
     try { bytes = new Uint8Array(readFileSync(target)); }
     catch { io.out(asciiJson({ verified: false, expected: said, reason: `cannot read ${target}` }) + "\n"); return 1; }
   }
-  if (checkSaid(bytes, said)) { io.out(asciiJson({ verified: true, said, ...where, bytes: bytes.length, ...browsers }) + "\n"); return 0; }
+  const unicode = illFormed(bytes);
+  if (checkSaid(bytes, said)) { io.out(asciiJson({ verified: true, said, ...where, bytes: bytes.length, ...browsers, ...unicode }) + "\n"); return 0; }
   const needle = Buffer.from(said, "ascii");
   const present = Buffer.from(bytes).includes(needle);
   const computed = present ? saidOf(replaceAll(bytes, needle, FILL)) : saidOf(bytes);
   const reason = !present ? "the SAID is not in the bytes"
     : computed !== said ? "the digest of the hashed form is not the SAID"
     : "the hashed form does not rebuild to the served bytes";
-  io.out(asciiJson({ verified: false, expected: said, ...where, computed, reason, ...browsers }) + "\n");
+  io.out(asciiJson({ verified: false, expected: said, ...where, computed, reason, ...browsers, ...unicode }) + "\n");
   return 1;
 }
 

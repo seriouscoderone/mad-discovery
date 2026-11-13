@@ -52,6 +52,27 @@ export function parseBounded(bytes: Uint8Array): { ok: true; value: unknown } | 
   try { return { ok: true, value: JSON.parse(Buffer.from(bytes).toString("utf8")) }; } catch { return { ok: false }; }
 }
 
+/**
+ * The strings, member names and values, that are not well-formed Unicode (a lone surrogate, such as the escape \ud83d alone).
+ * A browser wallet refuses a file that holds one, so verify reports and build warns; information only, never a failure
+ * (Ruling 12's amendment). The parsed value is counted and dropped, never written.
+ */
+export function illFormedStrings(bytes: Uint8Array): { parsed: boolean; count: number } {
+  const p = parseBounded(bytes);
+  if (!p.ok) return { parsed: false, count: 0 };
+  let count = 0;
+  const stack: unknown[] = [p.value];
+  while (stack.length > 0) {
+    const v = stack.pop();
+    if (typeof v === "string") { if (!v.isWellFormed()) count++; }
+    else if (Array.isArray(v)) { for (const inner of v) stack.push(inner); }
+    else if (v !== null && typeof v === "object") {
+      for (const [k, inner] of Object.entries(v)) { if (!k.isWellFormed()) count++; stack.push(inner); }
+    }
+  }
+  return { parsed: true, count };
+}
+
 const escapePointer = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
 
 type Frame =
