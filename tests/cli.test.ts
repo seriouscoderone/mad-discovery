@@ -261,7 +261,7 @@ test("verify of a file says nothing about browsers: no answer, no header", () =>
 test("the usage names five commands", () => {
   const r = run();
   assert.equal(r.code, 2);
-  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "who <SAID> --from <source address> [--catalog <catalog address>]", "get <SAID> --from <source address> --out <folder>", "catalog build --out <folder> [--candidates <file>]... [--from <source address>]..."]) assert.ok(r.err.includes(cmd), cmd);
+  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "verify <source address>", "who <SAID> --from <source address> [--catalog <catalog address>]", "get <SAID> --from <source address> --out <folder>", "catalog build --out <folder> [--candidates <file>]... [--from <source address>]..."]) assert.ok(r.err.includes(cmd), cmd);
 });
 
 test("an out folder filled during the run is a reported failure, never a crash", async () => {
@@ -373,4 +373,46 @@ test("who --catalog passes the catalog through; a bad catalog address is a usage
     c = capture();
     assert.equal(await main(["who", SELECTION, "--from", address, "--catalog", "https://c.example/not-a-catalog.json"], c.io, local), 2);
   } finally { await a.close(); await cat.close(); }
+});
+
+test("verify over a source document address: readable as a source exits 0 and reports browserWallets; nothing read exits 1", async () => {
+  const a = await Origin.start();
+  try {
+    const { address, plan } = a.source("mad/", { serve: [SELECTION] }, compactInputs);
+    let c = capture();
+    assert.equal(await main(["verify", address], c.io, local), 0, "absence of the header is not a failure");
+    assert.deepEqual(c.json(), { source: address, document: "ok", serves: plan.document.serves.length, publications: 0, introductions: 0, dropped: { entries: 0, publications: 0 }, browserWallets: CANNOT_READ });
+    // As CloudFront's SimpleCORS policy does: the header only when the request carries Origin.
+    const origins: unknown[] = [];
+    a.behave = (req, res) => { origins.push(req.headers.origin); if (req.headers.origin !== undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
+    c = capture();
+    assert.equal(await main(["verify", address], c.io, local), 0);
+    assert.equal(c.json().document, "ok");
+    assert.equal(c.json().browserWallets, CAN_READ);
+    assert.deepEqual(origins, ["https://wallet.invalid"], "one request, asked as a browser would");
+    a.behave = null;
+    // Nothing served there: the fetch outcome, no browserWallets.
+    const missing = `${a.origin}/gone/source.json`;
+    c = capture();
+    assert.equal(await main(["verify", missing], c.io, local), 1);
+    assert.deepEqual(c.json(), { source: missing, document: "not-found" });
+    // Bytes that do not read as this source's document.
+    for (const body of ["{}", JSON.stringify({ source: "https://other.example/mad/source.json" })]) {
+      a.put("bad/source.json", body);
+      const bad = `${a.origin}/bad/source.json`;
+      c = capture();
+      assert.equal(await main(["verify", bad], c.io, local), 1, body);
+      assert.deepEqual(c.json(), { source: bad, document: "not a source document", browserWallets: CANNOT_READ });
+    }
+    // One argument that is not a source address stays a usage error and fetches nothing.
+    const requests = a.requests.length;
+    c = capture();
+    assert.equal(await main(["verify", `${a.origin}/mad/definitions/${SELECTION}.json`], c.io, local), 2);
+    assert.equal(c.out(), "");
+    assert.ok(c.err().includes("The SAID is required"));
+    c = capture();
+    assert.equal(await main(["verify", join(fixtures, "compact", `${QVI}.json`)], c.io, local), 2);
+    assert.ok(c.err().includes("The SAID is required"));
+    assert.equal(a.requests.length, requests, "usage errors fetch nothing");
+  } finally { a.behave = null; await a.close(); }
 });

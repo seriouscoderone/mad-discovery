@@ -47,6 +47,7 @@ npm test                                        # node --test over tests/*.test.
 node bin/mad-discovery.ts build <folder> --config <file> --out <folder>
 node bin/mad-discovery.ts verify <file> <SAID>
 node bin/mad-discovery.ts verify <https address> <SAID>
+node bin/mad-discovery.ts verify <source address>
 node bin/mad-discovery.ts who <SAID> --from <source address>
 node bin/mad-discovery.ts get <SAID> --from <source address> --out <folder>
 node bin/mad-discovery.ts who <SAID> --from <source address> --catalog <catalog address>

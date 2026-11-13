@@ -9,6 +9,7 @@ import { WALK, CATALOG, ROW, CONTAINED, type Limits } from "./limits.ts";
 import { walk } from "./walk.ts";
 import { get } from "./get.ts";
 import { redirectTarget } from "./read.ts";
+import { readSourceDocument } from "./document.ts";
 import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
 import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from "./catalog.ts";
@@ -23,6 +24,7 @@ const FROM_NOTE = "--from must be a source address: https, a DNS name, a path en
 const USAGE = `usage:
   mad-discovery build <folder> --config <file> --out <folder>
   mad-discovery verify <file or address> <SAID>
+  mad-discovery verify <source address>
   mad-discovery who <SAID> --from <source address> [--catalog <catalog address>]
   mad-discovery get <SAID> --from <source address> --out <folder>
   mad-discovery catalog build --out <folder> [--candidates <file>]... [--from <source address>]...
@@ -97,22 +99,37 @@ function build(args: string[], io: Io): number {
   }
 }
 
+const isAddress = (s: string): boolean => /^https?:\/\//i.test(s);
+
+/**
+ * Asks as a browser would, with an Origin header: a host may send Access-Control-Allow-Origin only to such a request. One request.
+ * `browserWallets` is information for the operator, never a failure: a source need not be readable from a browser.
+ */
+async function fetchAsBrowser(address: string, options: RunOptions) {
+  const f = await session(options).fetch(address, { asBrowser: true });
+  if (f.outcome !== "ok") return f;
+  const browserWallets = f.anyOrigin ? "can read this file: it was sent with Access-Control-Allow-Origin: *" : "cannot read this file: it was sent without Access-Control-Allow-Origin: *";
+  return { ...f, browserWallets };
+}
+
 async function verify(args: string[], io: Io, options: RunOptions): Promise<number> {
   const [target, said] = args;
+  if (target !== undefined && said === undefined && isAddress(target)) {
+    const source = parseSourceAddress(target, { test: options.test });
+    if (source !== null) return await verifySource(source.address, io, options);
+  }
   if (target === undefined || said === undefined || !isSaid(said)) return usage(io, "The SAID is required and must match the pattern.");
   let bytes: Uint8Array;
   let where: { address?: string } = {};
   let browsers: { browserWallets?: string } = {};
-  if (/^https?:\/\//i.test(target)) {
+  if (isAddress(target)) {
     const address = parseHttpsAddress(target, { test: options.test });
     if (address === null) { io.out(asciiJson({ verified: false, expected: said, address: target, reason: "refused-address" }) + "\n"); return 1; }
-    // Asked as a browser would, with an Origin header: a host may send Access-Control-Allow-Origin only to such a request.
-    const f = await session(options).fetch(address, { asBrowser: true });
+    const f = await fetchAsBrowser(address, options);
     if (f.outcome !== "ok") { io.out(asciiJson({ verified: false, expected: said, address, reason: f.outcome, ...redirectTarget(f) }) + "\n"); return 1; }
     bytes = f.bytes;
     where = { address };
-    // Information for the operator, never a failure: a source need not be readable from a browser.
-    browsers = { browserWallets: f.anyOrigin ? "can read this file: it was sent with Access-Control-Allow-Origin: *" : "cannot read this file: it was sent without Access-Control-Allow-Origin: *" };
+    browsers = { browserWallets: f.browserWallets };
   } else {
     try { bytes = new Uint8Array(readFileSync(target)); }
     catch { io.out(asciiJson({ verified: false, expected: said, reason: `cannot read ${target}` }) + "\n"); return 1; }
@@ -126,6 +143,17 @@ async function verify(args: string[], io: Io, options: RunOptions): Promise<numb
     : "the hashed form does not rebuild to the served bytes";
   io.out(asciiJson({ verified: false, expected: said, ...where, computed, reason, ...browsers }) + "\n");
   return 1;
+}
+
+/** The source document at a source address: readable as a source (dropped entries are counted, not a failure), and by browser wallets. */
+async function verifySource(source: string, io: Io, options: RunOptions): Promise<number> {
+  const f = await fetchAsBrowser(source, options);
+  if (f.outcome !== "ok") { io.out(asciiJson({ source, document: f.outcome, ...redirectTarget(f) }) + "\n"); return 1; }
+  const r = readSourceDocument(f.bytes, source, { test: options.test });
+  if (!r.ok) { io.out(asciiJson({ source, document: "not a source document", browserWallets: f.browserWallets }) + "\n"); return 1; }
+  const d = r.document;
+  io.out(asciiJson({ source, document: "ok", serves: d.serves.length, publications: d.publications.length, introductions: d.introductions.length, dropped: r.dropped, browserWallets: f.browserWallets }) + "\n");
+  return 0;
 }
 
 async function who(args: string[], io: Io, options: RunOptions): Promise<number> {
