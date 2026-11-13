@@ -6,7 +6,8 @@ import { paths } from "../src/scan.ts";
 import { saidOf, FILL } from "../src/said.ts";
 import { Session } from "../src/session.ts";
 import { WALK, type Limits } from "../src/limits.ts";
-import { walk, nextLevel } from "../src/walk.ts";
+import { walk } from "../src/walk.ts";
+import { nextLevel } from "../src/crawl.ts";
 import { readSource } from "../src/read.ts";
 import { Origin } from "./helpers/servers.ts";
 
@@ -256,7 +257,7 @@ test("within a depth: 'for' first, then one from each introducing source in turn
     visited("https://a.example/source.json", [{ source: "https://a1.example/source.json", for: [] }, { source: "https://a2.example/source.json", for: [X] }, { source: "https://a3.example/source.json", for: [] }]),
     visited("https://b.example/source.json", [{ source: "https://a1.example/source.json", for: [] }, { source: "https://b1.example/source.json", for: [X] }, { source: "https://b2.example/source.json", for: [] }, { source: "https://seen.example/source.json", for: [] }]),
   ];
-  const next = nextLevel(X, here, new Set(["https://seen.example/source.json"]));
+  const next = nextLevel((i) => i.for.includes(X), here, new Set(["https://seen.example/source.json"]));
   assert.deepEqual(next.map((c) => [c.address.slice(8, 10), c.named]), [["a2", true], ["b1", true], ["a1", false], ["a3", false], ["b2", false]], "b's a1 is a's a1, taken once; then a3 and b2 in the second turn");
   assert.deepEqual(next[0]!.via, ["https://a.example/source.json"]);
   assert.deepEqual(next[1]!.via, ["https://b.example/source.json"]);
