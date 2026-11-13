@@ -54,7 +54,7 @@ node bin/mad-discovery.ts who <SAID> --from <source address> --catalog <catalog 
 node bin/mad-discovery.ts catalog build --out <folder> [--candidates <file>]... [--from <source address>]...
 ```
 
-`verify` of a definition adds `wellFormed: false` and the count of ill-formed strings when the definition holds a lone surrogate, and `build` lists such inputs under `warnings`; neither changes the exit status (Ruling 12). `who` and `get` reach only `https` sources on the default port at DNS names; the tests stand up local origins through a test-only option that no flag exposes. A source at a host root also writes `.well-known/ai-catalog.json`; GitHub Pages skips dot-folders unless a branch deploy has an empty `.nojekyll` or an Actions deploy sets `include-hidden-files: true`.
+`verify` of a definition adds `wellFormed: false` and the count of ill-formed strings when the definition holds a lone surrogate, and `build` lists such served definitions under `warnings`; neither changes the exit status (Ruling 12). `who` and `get` reach only `https` sources on the default port at DNS names; the tests stand up local origins through a test-only option that no flag exposes. A source at a host root also writes `.well-known/ai-catalog.json`; GitHub Pages skips dot-folders unless a branch deploy has an empty `.nojekyll` or an Actions deploy sets `include-hidden-files: true`.
 
 The input folder holds one file per definition, named `<SAID>.json`. `fixtures/gym-config.json` is an example configuration; `fixtures/README.md` says where every test vector came from.
 
