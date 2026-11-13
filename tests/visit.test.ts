@@ -46,7 +46,9 @@ test("a source is read whole: every served definition fetched in SAID order, ver
     for (const c of d.contains) { const p = paths(bytes, c.said); assert.deepEqual(c.paths, p.paths); assert.equal(c.appearances, p.count); }
   }
   assert.deepEqual(v.failed, []); assert.equal(v.untried, 0); assert.equal(v.omittedContained, 0); assert.deepEqual(v.notContained, []);
-  assert.equal(v.document?.pages, true); assert.equal(v.base, `${a.origin}/mad/`);
+  assert.equal(v.pages, true); assert.equal(v.base, `${a.origin}/mad/`);
+  assert.deepEqual(v.publications, plan.document.publications); assert.equal(v.by, plan.document.by);
+  assert.ok(!("document" in v), "the parsed document is not kept: only what the build reads");
   assert.equal(a.requests.filter((p) => p === "robots.txt").length, 1);
 });
 

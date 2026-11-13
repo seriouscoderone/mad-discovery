@@ -123,13 +123,13 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
     const perSaid = new Map<string, { publications: Publication[]; referrers: { said: string; paths: string[]; appearances: number }[] }>();
     const bucket = (said: string) => { let b = perSaid.get(said); if (b === undefined) { b = { publications: [], referrers: [] }; perSaid.set(said, b); } return b; };
     for (const d of v.verified) bucket(d.said);   // a serving source has a counts entry even with nothing to count
-    for (const p of v.document!.publications) if (rows.has(p.target)) bucket(p.target).publications.push(p);
+    for (const p of v.publications) if (rows.has(p.target)) bucket(p.target).publications.push(p);
     for (const d of v.verified) for (const c of d.contains) if (rows.has(c.said)) bucket(c.said).referrers.push({ said: d.said, paths: c.paths, appearances: c.appearances });
     for (const [said, b] of perSaid) {
       const r = rowFor(said);
       if (b.publications.length > 0) {
         const first = b.publications[0]!;
-        const by = first.by ?? v.document!.by;
+        const by = first.by ?? v.by;
         r.publications.push({ source: v.address, ...(by !== undefined ? { by } : {}), publication: first });
       }
       b.referrers.sort(byKey("said"));
@@ -183,7 +183,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
     seeded,
     ...(seeded ? { note: SEEDED_NOTE } : {}),
   }));
-  const sourcePages: SourcePages = new Map(read.map((v) => [v.address, { pages: v.document!.pages === true, base: v.base! }]));
+  const sourcePages: SourcePages = new Map(read.map((v) => [v.address, { pages: v.pages, base: v.base! }]));
   for (const [path, text] of catalogPages([...rows.values()], sourcePages, seeded)) files.set(path, encoder.encode(text));
   return { ok: true, files, summary: { rows: rows.size, sources: { ok: visits.filter((v) => v.outcome === "ok").length, truncated: visits.filter((v) => v.outcome === "truncated").length, other: visits.length + skipped.length - read.length }, seeded } };
 }

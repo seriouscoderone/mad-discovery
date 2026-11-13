@@ -9,7 +9,7 @@ import { CONTAINED, type ContainedLimits } from "./limits.ts";
 import type { Robots } from "./robots.ts";
 import type { Candidate, Node } from "./crawl.ts";
 import type { Dropped } from "./document.ts";
-import type { SourceDocument } from "./source.ts";
+import type { Publication } from "./source.ts";
 
 export type Contains = { said: string; paths: string[]; appearances: number };
 /** A verified definition, by what its bytes contain; the bytes themselves are not kept, and the record is bounded (omittedContained counts the rest). */
@@ -20,7 +20,9 @@ export type SourceVisit = Node & {
   limits: string[];                            // the count limits that cut it, in table order; or the budget that stopped it before it started
   digest: string | null;                       // hex Blake3-256 of the document bytes as read
   dropped: Dropped;
-  document: SourceDocument | null;
+  publications: Publication[];                 // what the build reads of the document; the document itself is not kept
+  by: string | undefined;
+  pages: boolean;
   base: string | null;
   verified: Definition[];
   failed: { said: string; outcome: Reason }[];
@@ -29,7 +31,7 @@ export type SourceVisit = Node & {
   notContained: { in: string; said: string }[];
 };
 
-const empty = (c: Candidate): SourceVisit => ({ address: c.address, via: c.via, fetched: false, read: false, introductions: [], outcome: "ok", limits: [], digest: null, dropped: { entries: 0, publications: 0 }, document: null, base: null, verified: [], failed: [], untried: 0, omittedContained: 0, notContained: [] });
+const empty = (c: Candidate): SourceVisit => ({ address: c.address, via: c.via, fetched: false, read: false, introductions: [], outcome: "ok", limits: [], digest: null, dropped: { entries: 0, publications: 0 }, publications: [], by: undefined, pages: false, base: null, verified: [], failed: [], untried: 0, omittedContained: 0, notContained: [] });
 
 /**
  * The catalog build's visit of one source (docs/design.md "The catalog", step 3): the robots.txt rule, then the document, then every
@@ -76,7 +78,9 @@ export async function visitAll(c: Candidate, session: Session, robots: Robots, c
   if (v.omittedContained > 0) v.limits.push("contained");
   v.outcome = v.limits.length > 0 ? "truncated" : "ok";
   v.dropped = dropped;
-  v.document = document;
+  v.publications = document.publications;
+  v.by = document.by;
+  v.pages = document.pages === true;
   v.base = base;
   return v;
 }
