@@ -6,6 +6,7 @@ import { visitAll } from "./visit.ts";
 import { byKey, isRecord, type Publication } from "./source.ts";
 import { asciiJson } from "./json.ts";
 import { PATH_LIMITS, PUBLICATION, type RowLimits, type ContainedLimits } from "./limits.ts";
+import { catalogPages, type SourcePages } from "./catalogpages.ts";
 import type { Session } from "./session.ts";
 import type { Robots } from "./robots.ts";
 
@@ -182,5 +183,7 @@ export async function buildCatalog(input: BuildInput): Promise<BuildOutcome> {
     seeded,
     ...(seeded ? { note: SEEDED_NOTE } : {}),
   }));
+  const sourcePages: SourcePages = new Map(read.map((v) => [v.address, { pages: v.document!.pages === true, base: v.base! }]));
+  for (const [path, text] of catalogPages([...rows.values()], sourcePages, { test }, seeded)) files.set(path, encoder.encode(text));
   return { ok: true, files, summary: { rows: rows.size, sources: { ok: visits.filter((v) => v.outcome === "ok").length, truncated: visits.filter((v) => v.outcome === "truncated").length, other: visits.length + skipped.length - read.length }, seeded } };
 }

@@ -27,7 +27,7 @@ function publicationsFor(document: SourceDocument, said: string): Publication[] 
 
 const CSP = "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'";
 
-function shell(title: string, stylesheet: string, body: string): string {
+export function shell(title: string, stylesheet: string, body: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -45,15 +45,15 @@ ${body}
 }
 
 /** A link to another page of this source, by SAID, relative to a definition page. Only a SAID can be a target. */
-function pageLink(said: string, fromIndex: boolean): string {
+export function pageLink(said: string, fromIndex: boolean): string {
   if (!isSaid(said)) throw new Error("only a SAID can be a page link");
   return `<a href="${fromIndex ? "" : "../"}${said}/index.html"><code>${said}</code></a>`;
 }
 
 /** A link to an address that passed the address rule; null (it did not) is refused. */
-function addressLink(address: string | null, text: string): string {
+export function addressLink(address: string | null, text: string): string {
   if (address === null) throw new Error("not an address");
-  return `<a href="${escapeHtml(address)}">${escapeHtml(text)}</a>`;
+  return `<a href="${escapeHtml(address)}" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
 }
 
 /** The definition's content as an outline. Strings that are linkable SAIDs become links; everything else is text. */
@@ -64,7 +64,7 @@ function outline(value: unknown, linkable: Set<string>): string {
   return `<dl>${Object.entries(value as Record<string, unknown>).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${outline(v, linkable)}</dd>`).join("")}</dl>`;
 }
 
-function offered(p: Publication, sourceBy: string | undefined): string {
+export function offered(p: Publication, sourceBy: string | undefined): string {
   const by = p.by ?? sourceBy;
   return `<section><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.description)}</p>` +
     (p.tags.length > 0 ? `<p>Tags: ${p.tags.map((t) => `<code>${escapeHtml(t)}</code>`).join(" ")}</p>` : "") +
@@ -122,7 +122,7 @@ function indexPage(input: PagesInput): string {
   return shell("Definitions served here", "style.css", body);
 }
 
-const STYLE_CSS = `body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:48rem;padding:1rem}
+export const STYLE_CSS = `body{font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:48rem;padding:1rem}
 code,pre{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
 pre{background:#f4f4f4;padding:.5rem;white-space:pre-wrap}
 dl{margin:0 0 0 1rem}dt{font-weight:600}dd{margin:0 0 .25rem 1rem}
