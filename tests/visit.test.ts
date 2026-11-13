@@ -124,7 +124,7 @@ test("contained SAIDs recorded from one definition and from one source are bound
   const big2 = definition(saids, ',"n":"big2"');
   const served = [big, big2].sort(byKey("said"));
   const address = `${a.origin}/s/source.json`;
-  a.put("s/source.json", JSON.stringify({ source: address, serves: served.map((d) => ({ said: d.said })) }));
+  a.put("s/source.json", JSON.stringify({ source: address, serves: served.map((d) => ({ said: d.said, refers: saids })) }));   // refers names all five: checked against the full scan, not the cut
   for (const d of served) a.put(`s/definitions/${d.said}.json`, d.bytes);
   const s = session();
   const v = await visitAll(cand(address), s, new Robots(s), { perDefinition: 3, perSource: 4 });
@@ -135,6 +135,7 @@ test("contained SAIDs recorded from one definition and from one source are bound
   assert.deepEqual(d2!.contains.map((c) => c.said), saids.slice(0, 1), "one slot of the source's four is left");
   assert.equal(d2!.omittedContained, 4);
   assert.equal(v.omittedContained, 6);
+  assert.deepEqual(v.notContained, [], "every refers entry is in the full scan, although the record was cut");
   const loose = session();
   const w = await visitAll(cand(address), loose, new Robots(loose));
   assert.equal(w.outcome, "ok"); assert.equal(w.omittedContained, 0); assert.equal(w.verified[0]!.contains.length, 5);
