@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { main, type Io } from "../src/cli.ts";
 import { CATALOG } from "../src/limits.ts";
 import { readInputs } from "../src/inputs.ts";
+import { SEEDED_NOTE } from "../src/catalogpages.ts";
 import { warcGz } from "./helpers/warc.ts";
 import { Origin } from "./helpers/servers.ts";
 
@@ -55,12 +56,13 @@ test("the stranger, by fixture: two sources that never link, named in a WARC fix
     assert.deepEqual(meta.candidates, [{ finder: "robots", snapshot: SNAP, count: 3, path: `candidates/robots/${SNAP}.json` }]);
     assert.equal(meta.droppedCandidates, 0); assert.deepEqual(meta.from, []); assert.equal(meta.seeded, false);
     assert.ok(existsSync(join(out, "candidates", "robots", `${SNAP}.json`)), "the candidate file is copied into the catalog");
-    const sources = JSON.parse(readFileSync(join(out, "sources.json"), "utf8")) as { sources: { address: string; found: { by: string; finder?: string; place?: Record<string, unknown> }[] }[] };
+    const sources = JSON.parse(readFileSync(join(out, "sources.json"), "utf8")) as { sources: { address: string; found: { by: string; finder?: string; snapshot?: string; place?: Record<string, unknown> }[] }[] };
     for (const addr of [aAddr, bAddr]) {
       const s = sources.sources.find((x) => x.address === addr)!;
-      assert.ok(s.found.every((f) => f.by === "finder" && f.finder === "robots" && typeof f.place?.["file"] === "string" && typeof f.place?.["offset"] === "number" && typeof f.place?.["robots"] === "string"), `${addr} found by the finder alone`);
+      assert.ok(s.found.every((f) => f.by === "finder" && f.finder === "robots" && f.snapshot === SNAP && typeof f.place?.["file"] === "string" && typeof f.place?.["offset"] === "number" && typeof f.place?.["robots"] === "string"), `${addr} found by the finder alone`);
     }
     assert.equal(sources.sources.find((x) => x.address === aAddr)!.found.length, 2, "alpha was seen twice at two offsets: two places, two ways");
-    assert.ok(!readFileSync(join(out, "pages", "index.html"), "utf8").includes("hand-kept"), "not a seeded catalog");
+    assert.equal(sources.sources.find((x) => x.address === bAddr)!.found.length, 1, "beta was seen once");
+    assert.ok(!readFileSync(join(out, "pages", "index.html"), "utf8").includes(SEEDED_NOTE), "not a seeded catalog");
   } finally { a.behave = null; b.behave = null; await a.close(); await b.close(); await cc.close(); }
 });
