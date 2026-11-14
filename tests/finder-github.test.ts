@@ -74,3 +74,45 @@ test("a repository name outside GitHub's charset, or not well-formed, is skipped
     await assert.rejects(githubFinder(input(), "today"), /snapshot/);
   } finally { origin.behave = null; }
 });
+
+const serve = (body: (p: string) => string) => { origin.behave = (req, res) => { const p = req.url?.startsWith("/github/search/repositories") ? pageOf(req.url) : null; if (p !== null) { res.setHeader("content-type", "application/json"); res.end(body(p)); return true; } return false; }; };
+const full = (from: number) => Array.from({ length: 100 }, (_, i) => item(from + i));
+
+test("page 1 must carry a total count that is a non-negative integer", async () => {
+  try {
+    for (const total of [undefined, "4", -1, 1.5, null]) {
+      serve(() => JSON.stringify({ incomplete_results: false, items: [item(1)], ...(total === undefined ? {} : { total_count: total }) }));
+      await assert.rejects(githubFinder(input(), "2026-11-12"), /page 1 has no total_count/, `total_count ${String(total)}`);
+    }
+  } finally { origin.behave = null; }
+});
+
+test("ten full pages are accepted only when the total count is exactly 1,000; any other count over ten full pages fails", async () => {
+  try {
+    serve((p) => page(full((Number(p) - 1) * 100), 1000));
+    slept.length = 0;
+    const r = await githubFinder(input(), "2026-11-12");
+    assert.equal(r.candidates.length, 1000); assert.equal(r.summary["pages"], 10);
+    assert.deepEqual(slept, Array(9).fill(PAUSE_MS), "nine pauses");
+    serve((p) => page(full((Number(p) - 1) * 100), 999));
+    await assert.rejects(githubFinder(input(), "2026-11-12"), /ten full pages/);
+  } finally { origin.behave = null; }
+});
+
+test("an item that is not an object is skipped, a full_name that is not a string is skipped, a page that is not an object fails", async () => {
+  try {
+    serve(() => page([7, null, "x", { full_name: 5, homepage: "https://n.example/source.json" }, item(1)]));
+    const r = await githubFinder(input(), "2026-11-12");
+    assert.deepEqual(r.candidates.map((c) => c.place["repository"]), ["u/r1"]); assert.equal(r.summary["skipped"], 4);
+    serve(() => "[]");
+    await assert.rejects(githubFinder(input(), "2026-11-12"), /items/);
+  } finally { origin.behave = null; }
+});
+
+test("a homepage over 512 characters is skipped", async () => {
+  try {
+    serve(() => page([{ full_name: "u/long", homepage: `https://long.example/${"a".repeat(600)}/source.json` }, item(2)]));
+    const r = await githubFinder(input(), "2026-11-12");
+    assert.deepEqual(r.candidates.map((c) => c.place["repository"]), ["u/r2"]); assert.equal(r.summary["skipped"], 1);
+  } finally { origin.behave = null; }
+});
