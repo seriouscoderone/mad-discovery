@@ -17,6 +17,7 @@ export type InputOptions = {
   now?: () => number;                    // tests inject a clock
   resolve?: Resolve;                     // tests inject answers; resolveNames otherwise
   onThrottle?: (host: string, status: number, ms: number) => void;   // told each pause a host's slow-down sets: the URL's hostname, never text from the answer
+  ccRate?: number;                       // request starts a second to Common Crawl's hosts; COMMON_CRAWL_RATE by default; set by test code only
 };
 
 export type InputReason = "refused-url" | "refused-address" | "status" | "redirected" | "encoded" | "too-large" | "unreachable";
@@ -33,6 +34,7 @@ export class InputError extends Error {
 
 export const RETRY_AFTER_MAX = 120_000;   // a host's Retry-After, honoured up to two minutes
 export const RETRIES = 8;                 // after a 5xx other than a 503, a connection error, an idle connection, or a body that broke off
+export const COMMON_CRAWL_RATE = 5;      // request starts a second to Common Crawl's hosts, retries included: under the per-client rule its WAF enforces, tripped at 2,341 requests in 130 s at 18 a second
 export const THROTTLE_RETRIES = 15;       // after a host said slow down (a 429, a 503, a rate-limited 403): 1+2+4+...+32+60*9 = 603 s, about ten minutes
 const MAX_PAUSE = 60_000;                 // no doubled pause is longer
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -45,6 +47,8 @@ const LOOPBACK_BASE = /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?\//;
  * idle connection, retries another 5xx, a connection error or (readAll) a body that broke off eight times, no faster than once a second; a
  * host saying slow down (a 429, a 503, GitHub's rate-limited 403, any 403 from Common Crawl, whose missing file is a 404) fifteen times,
  * about ten minutes, honouring Retry-After and making every request wait out the pause; and holds at most `connections` sockets to a host.
+ * It starts at most COMMON_CRAWL_RATE requests a second to Common Crawl's hosts (the archive and the index together), shared by every
+ * worker; GitHub's pace is the GitHub finder's own.
  */
 export class Input {
   readonly bases: InputBases;
@@ -59,6 +63,8 @@ export class Input {
   private readonly httpAgent: http.Agent;
   private readonly checked = new Map<string, Promise<string>>();   // host -> its one lookup, shared by every request
   private pausedUntil = 0;                                 // a host said slow down: no request starts before this
+  private readonly spacing: number;                        // ms between two starts to Common Crawl's hosts
+  private nextStart = 0;                                   // the earliest the next start to Common Crawl's hosts may be
 
   constructor(bases: InputBases, opts: InputOptions = {}) {
     this.bases = bases;
@@ -69,6 +75,7 @@ export class Input {
     this.test = opts.test === true;
     this.pause = opts.pause ?? 1000;
     this.idleMs = opts.idleMs ?? 60_000;
+    this.spacing = 1000 / (opts.ccRate ?? COMMON_CRAWL_RATE);
     const max = opts.connections ?? 16;
     this.httpsAgent = new https.Agent({ keepAlive: true, maxSockets: max });
     this.httpAgent = new http.Agent({ keepAlive: true, maxSockets: max });
@@ -124,6 +131,20 @@ export class Input {
     });
   }
 
+  /** A URL on Common Crawl's hosts: its archive or its index. */
+  private commonCrawl(url: string): boolean {
+    return url.startsWith(this.bases.archive) || url.startsWith(this.bases.index);
+  }
+
+  /** Waits for this request's start to Common Crawl's hosts: the slot is taken before the wait, so concurrent workers queue one spacing apart. */
+  private async paced(url: string): Promise<void> {
+    if (!this.commonCrawl(url)) return;
+    const now = this.now();
+    const start = Math.max(now, this.nextStart);
+    this.nextStart = start + this.spacing;
+    if (start > now) await this.sleep(start - now);
+  }
+
   /**
    * What an answer other than a 200 or a redirect is: the host saying slow down (its pause applies to every request of this input), a
    * passing fault, or final. A 403 from Common Crawl's hosts is their rate limit, since a missing file there is a 404; a 403 from GitHub
@@ -133,7 +154,7 @@ export class Input {
     const status = res.statusCode ?? 0;
     if (status === 429 || status === 503) return "throttled";
     if (status === 403) {
-      if (url.startsWith(this.bases.archive) || url.startsWith(this.bases.index)) return "throttled";
+      if (this.commonCrawl(url)) return "throttled";
       return res.headers["x-ratelimit-remaining"] === "0" || res.headers["retry-after"] !== undefined ? "throttled" : "final";
     }
     return status >= 500 ? "fault" : "final";
@@ -163,6 +184,7 @@ export class Input {
         if (this.pausedUntil === target) break;
         target = this.pausedUntil;
       }
+      await this.paced(url);
       let res: http.IncomingMessage | null = null;
       try { res = await this.once(url, headers); } catch (e) {
         last = e instanceof InputError ? e : new InputError(url, "unreachable");

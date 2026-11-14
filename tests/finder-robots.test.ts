@@ -16,7 +16,7 @@ const origin = await Origin.start();
 const made: Input[] = [];
 after(async () => { for (const i of made) i.close(); await origin.close(); });
 const bases = { archive: `${origin.origin}/archive/`, index: `${origin.origin}/index/`, github: `${origin.origin}/github/` };
-const input = (more: InputOptions = {}) => { const i = new Input(bases, { test: true, sleep: async () => {}, ...more }); made.push(i); return i; };
+const input = (more: InputOptions = {}) => { const i = new Input(bases, { test: true, sleep: async () => {}, ccRate: Infinity, ...more }); made.push(i); return i; };   // unpaced: the pace has its own tests
 const SAMPLE = readFileSync(fileURLToPath(new URL("../fixtures/robotstxt/sample.warc.gz", import.meta.url)));
 const SNAP = "CC-MAIN-2026-43";
 const paths = (names: string[]) => gzipSync(Buffer.from(names.map((n) => `crawl-data/${SNAP}/segments/1.2/robotstxt/${n}`).join("\n") + "\n"));

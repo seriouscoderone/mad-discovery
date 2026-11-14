@@ -15,7 +15,7 @@ import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
 import { buildCatalog, readCandidateFile, toolCommit } from "./catalog.ts";
 import { candidateFileBytes, type CandidateFile, type FinderResult } from "./finders/candidates.ts";
-import { Input, InputError, PUBLIC_INPUTS, type InputBases } from "./finders/input.ts";
+import { Input, InputError, PUBLIC_INPUTS, COMMON_CRAWL_RATE, type InputBases } from "./finders/input.ts";
 import { listCrawls, robotsFinder, CRAWL } from "./finders/robots.ts";
 import { githubFinder } from "./finders/github.ts";
 import { FolderJournal } from "./finders/journal.ts";
@@ -28,7 +28,7 @@ export type RunOptions = {
   test?: boolean;
   resolve?: Resolve;
   limits?: Limits;
-  finderInputs?: InputBases & { pause?: number; today?: string };   // test code only: local origins standing for the public inputs
+  finderInputs?: InputBases & { pause?: number; ccRate?: number; today?: string };   // test code only: local origins standing for the public inputs
 };
 
 const FROM_NOTE = "--from must be a source address: https, a DNS name, a path ending in /source.json.";
@@ -263,7 +263,7 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
   const { archive, index, github } = options.finderInputs ?? PUBLIC_INPUTS;
   let label: string = finder;   // the snapshot being read, once there is one
   const onThrottle = (host: string, status: number, ms: number): void => { io.err(`${label}: ${host} asked to slow down (${status}): pausing ${ms / 1000} s\n`); };
-  const input = new Input({ archive, index, github }, { test: options.test === true, pause: options.finderInputs?.pause, onThrottle });
+  const input = new Input({ archive, index, github }, { test: options.test === true, pause: options.finderInputs?.pause, ccRate: options.finderInputs?.ccRate, onThrottle });
   try {
     let snapshots = [...new Set(named)];
     if (finder === "github") snapshots = [options.finderInputs?.today ?? new Date().toISOString().slice(0, 10)];
@@ -296,7 +296,8 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
         const progress = (done: number, total: number): void => { if (done - last >= 1000 || done === total) { last = done; io.err(`${snapshot}: ${done}/${total} files\n`); } };
         const listing = (files: number): void => {
           const mb = Math.round(files * 1.5);   // 1.4 to 1.6 MB a file, measured 2026-11-12
-          io.err(`${snapshot}: ${files} archive files to read, about ${mb >= 1000 ? `${Math.round(mb / 1000)} GB` : `${Math.max(1, mb)} MB`}\n`);
+          const hours = (files / COMMON_CRAWL_RATE / 3600).toFixed(1);   // the pace bounds the run: one start per file
+          io.err(`${snapshot}: ${files} archive files to read, about ${mb >= 1000 ? `${Math.round(mb / 1000)} GB` : `${Math.max(1, mb)} MB`}, about ${hours} hours at ${COMMON_CRAWL_RATE} files a second\n`);
         };
         const result: FinderResult = journal !== null ? await robotsFinder(snapshot, input, { test: options.test }, { progress, listing, journal }) : await githubFinder(input, snapshot, { test: options.test });
         writeFileSync(`${path}.part`, candidateFileBytes(result));

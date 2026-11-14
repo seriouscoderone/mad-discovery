@@ -475,7 +475,7 @@ test("catalog find writes one candidate file per snapshot, keeps files already t
   const cc = await Origin.start();
   try {
     const SNAP = "CC-MAIN-2026-43";
-    const bases = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" };
+    const bases = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, ccRate: Infinity, today: "2026-11-12" };
     const opts = { ...local, finderInputs: bases };
     const paths = (snap: string, names: string[]) => gzipSync(Buffer.from(names.map((n) => `crawl-data/${snap}/segments/1.2/robotstxt/${n}`).join("\n") + "\n"));
     cc.put("index/collinfo.json", JSON.stringify([{ id: "CC-MAIN-2026-43" }, { id: "CC-MAIN-2026-39" }, { id: "CC-MAIN-2026-34" }, { id: "CC-MAIN-2026-30" }]));
@@ -506,7 +506,7 @@ test("catalog find writes one candidate file per snapshot, keeps files already t
     const file = JSON.parse(text) as { finder: string; snapshot: string; candidates: { address: string }[]; summary: Record<string, number> };
     assert.equal(file.finder, "robots"); assert.equal(file.snapshot, SNAP); assert.equal(file.candidates.length, 5); assert.equal(file.summary["files"], 1); assert.equal(file.summary["notAddresses"], 1);
     for (let i = 0; i < text.length; i++) { const code = text.charCodeAt(i); assert.ok(code === 10 || (code >= 32 && code <= 126), "ASCII"); }
-    assert.ok(c.err().includes(`${SNAP}: 1 archive files to read, about 2 MB`), "the size, announced on stderr");
+    assert.ok(c.err().includes(`${SNAP}: 1 archive files to read, about 2 MB, about 0.0 hours at 5 files a second\n`), "the size and the time the pace gives it, announced on stderr");
     assert.ok(c.err().includes(`${SNAP}: 1/1 files`), "progress on stderr");
     assert.ok(!existsSync(join(out, "robots", `${SNAP}.progress`)), "the journal is removed once the file is written");
     assert.ok(existsSync(join(out, "robots", "CC-MAIN-2026-34.progress", "0.json")), "and kept after a failure, with the file that finished, so the next run resumes");
@@ -566,7 +566,7 @@ test("catalog find says on stderr, never stdout, when Common Crawl asks it to sl
     cc.put(file, SAMPLE_WARC);
     let blocked = 0;
     cc.behave = (req, res) => { if (req.url === `/${file}` && blocked++ === 0) { res.statusCode = 403; res.end(); return true; } return false; };   // the WAF's 403, once
-    const opts = { ...local, finderInputs: { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" } };
+    const opts = { ...local, finderInputs: { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, ccRate: Infinity, today: "2026-11-12" } };
     const out = join(mkdtempSync(join(tmpdir(), "find-")), "c");
     const c = capture();
     assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", out, "--snapshot", SNAP], c.io, opts), 0);
@@ -581,7 +581,7 @@ test("catalog find says on stderr, never stdout, when Common Crawl asks it to sl
 test("catalog find treats a directory or a symlink where a candidate file belongs as a failure, not as a kept file", async () => {
   const cc = await Origin.start();
   try {
-    const opts = { ...local, finderInputs: { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" } };
+    const opts = { ...local, finderInputs: { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, ccRate: Infinity, today: "2026-11-12" } };
     cc.behave = (req, res) => { if (req.url?.startsWith("/github/search/repositories")) { res.setHeader("content-type", "application/json"); res.end(readFileSync(join(fixtures, "github", "search-sample.json"))); return true; } return false; };
     const dir = join(mkdtempSync(join(tmpdir(), "find-")), "c");
     mkdirSync(join(dir, "github", "2026-11-12.json"), { recursive: true });
@@ -606,7 +606,7 @@ test("catalog find given local inputs without the test option refuses them: find
   const cc = await Origin.start();
   try {
     cc.behave = (req, res) => { if (req.url?.startsWith("/github/search/repositories")) { res.setHeader("content-type", "application/json"); res.end(readFileSync(join(fixtures, "github", "search-sample.json"))); return true; } return false; };
-    const finderInputs = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" };
+    const finderInputs = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, ccRate: Infinity, today: "2026-11-12" };
     const out = join(mkdtempSync(join(tmpdir(), "find-")), "c");
     const c = capture();
     assert.equal(await main(["catalog", "find", "--finder", "github", "--out", out], c.io, { finderInputs }), 1);

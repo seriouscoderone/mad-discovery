@@ -13,7 +13,7 @@ const slept: number[] = [];
 let clock = 0;   // a sleep moves the clock, as time would
 const sleep = async (ms: number) => { slept.push(ms); clock += ms; };
 const now = () => clock;
-const input = (more: Record<string, unknown> = {}) => new Input(bases, { test: true, sleep, now, ...more });
+const input = (more: Record<string, unknown> = {}) => new Input(bases, { test: true, sleep, now, ccRate: Infinity, ...more });   // unpaced: the pace has its own tests
 const reason = (r: string, status?: number) => (e: unknown) => e instanceof InputError && e.reason === r && (status === undefined || e.status === status);
 
 test("the public inputs are the three hosts the design names, and nothing else is opened", async () => {
@@ -94,7 +94,7 @@ test("a redirect is not followed; a 404 fails at once; a plain 403 from GitHub f
     assert.deepEqual(slept, [1000, 2000], "recovered on the third try");
     const dead = await Origin.start(); const deadBases = { ...bases, archive: `${dead.origin}/archive/` }; await dead.close();
     slept.length = 0;
-    await assert.rejects(new Input(deadBases, { test: true, sleep, now }).open(`${deadBases.archive}x`), reason("unreachable"));
+    await assert.rejects(new Input(deadBases, { test: true, sleep, now, ccRate: Infinity }).open(`${deadBases.archive}x`), reason("unreachable"));
     assert.deepEqual(slept, FAULTED, "a connection error: eight retries");
     slept.length = 0;
     const quick = input({ idleMs: 50 });
@@ -134,7 +134,7 @@ test("a 403 from Common Crawl is its rate limit: it pauses every request of the 
   };
   try {
     let t = 0; const waits: number[] = [];
-    const j = new Input(bases, { test: true, now: () => t, sleep: async (ms) => { waits.push(ms); t += ms; } });
+    const j = new Input(bases, { test: true, ccRate: Infinity, now: () => t, sleep: async (ms) => { waits.push(ms); t += ms; } });
     assert.equal(Buffer.from(await j.readAll(`${origin.origin}/archive/blocked`, 10)).toString(), "ok");
     assert.deepEqual(waits, [1000, 2000, 4000], "the shared pause, doubling");
     t -= 3000;   // back inside the last pause: another request waits out what is left of it
@@ -216,7 +216,7 @@ test("Retry-After in seconds is honoured up to two minutes, and a host's slow-do
   };
   try {
     let t = 0; const waits: number[] = [];
-    const j = new Input(bases, { test: true, now: () => t, sleep: async (ms) => { waits.push(ms); } });   // a clock that does not move
+    const j = new Input(bases, { test: true, ccRate: Infinity, now: () => t, sleep: async (ms) => { waits.push(ms); } });   // a clock that does not move
     await j.readAll(`${origin.origin}/archive/once-busy`, 10);
     assert.deepEqual(waits, [5000], "Retry-After: 5");
     await j.readAll(`${origin.origin}/archive/a.bin`, 10);
@@ -239,6 +239,71 @@ test("Retry-After in seconds is honoured up to two minutes, and a host's slow-do
   } finally { origin.behave = null; }
 });
 
+/** A clock that each sleep moves to its end, as time would, sleeps begun together ending together; `starts` records where each sleep ends, the start it waited for. */
+const pacedClock = () => {
+  let t = 0;
+  const starts: number[] = [];
+  const sleep = async (ms: number) => { const end = t + ms; starts.push(end); await new Promise((r) => setImmediate(r)); t = Math.max(t, end); };
+  return { starts, now: () => t, sleep };
+};
+const spacing = (starts: number[]) => { const all = [0, ...[...starts].sort((a, b) => a - b)]; return all.slice(1).map((s, k) => s - all[k]!); };   // the first start is at 0
+
+test("requests to Common Crawl's archive start at most five a second, shared by every worker of the input", async () => {
+  origin.behave = (req, res) => { if (req.url?.startsWith("/archive/p")) { res.end("x"); return true; } return false; };
+  try {
+    const c = pacedClock();
+    const i = new Input(bases, { test: true, now: c.now, sleep: c.sleep, ccRate: 5 });
+    const before = origin.requests.length;
+    await Promise.all(Array.from({ length: 10 }, (_, k) => i.readAll(`${origin.origin}/archive/p${k}`, 10)));
+    assert.equal(origin.requests.length - before, 10);
+    assert.equal(c.starts.length, 9, "the first starts at once, the other nine wait");
+    assert.ok(spacing(c.starts).every((d) => d >= 200), `no two starts closer than 200 ms: ${c.starts.join(",")}`);
+    assert.ok(Math.max(...c.starts) >= 1800, "ten starts span at least 1.8 s of clock");
+    i.close();
+  } finally { origin.behave = null; }
+});
+
+test("requests to Common Crawl's index are paced too, sharing the archive's spacing", async () => {
+  origin.behave = (req, res) => { if (req.url?.startsWith("/archive/q") || req.url?.startsWith("/index/q")) { res.end("x"); return true; } return false; };
+  try {
+    const c = pacedClock();
+    const i = new Input(bases, { test: true, now: c.now, sleep: c.sleep, ccRate: 5 });
+    await Promise.all(Array.from({ length: 10 }, (_, k) => i.readAll(`${origin.origin}/${k % 2 === 0 ? "archive" : "index"}/q${k}`, 10)));
+    assert.equal(c.starts.length, 9);
+    assert.ok(spacing(c.starts).every((d) => d >= 200), `one spacing for both hosts: ${c.starts.join(",")}`);
+    assert.ok(Math.max(...c.starts) >= 1800);
+    i.close();
+  } finally { origin.behave = null; }
+});
+
+test("requests to GitHub are not paced by Common Crawl's rate", async () => {
+  origin.behave = (req, res) => { if (req.url?.startsWith("/github/r")) { res.end("x"); return true; } return false; };
+  try {
+    const c = pacedClock();
+    const i = new Input(bases, { test: true, now: c.now, sleep: c.sleep, ccRate: 5 });
+    await Promise.all(Array.from({ length: 10 }, (_, k) => i.readAll(`${origin.origin}/github/r${k}`, 10)));
+    assert.deepEqual(c.starts, [], "no sleeps");
+    i.close();
+  } finally { origin.behave = null; }
+});
+
+test("a retry after a slow-down is spaced like any other start", async () => {
+  let n = 0;
+  origin.behave = (req, res) => {
+    if (req.url !== "/archive/retried") return false;
+    if (n++ === 0) { res.statusCode = 403; res.end(); return true; }
+    res.end("ok"); return true;
+  };
+  try {
+    const c = pacedClock();
+    const waits: number[] = [];
+    const i = new Input(bases, { test: true, now: c.now, sleep: async (ms) => { waits.push(ms); await c.sleep(ms); }, ccRate: 5, pause: 50 });
+    assert.equal(Buffer.from(await i.readAll(`${origin.origin}/archive/retried`, 10)).toString(), "ok");
+    assert.deepEqual(waits, [50, 150], "the 50 ms pause, then what is left of the 200 ms spacing since the first start");
+    i.close();
+  } finally { origin.behave = null; }
+});
+
 test("an https host must resolve to public addresses only; a private or loopback answer is refused without connecting or retrying", async () => {
   const far = { archive: "https://archive.example/", index: "https://index.example/", github: "https://github.example/" };
   for (const answers of [["127.0.0.1"], ["10.0.0.1"], ["93.184.216.34", "192.168.1.1"], ["::1"]]) {
@@ -254,7 +319,7 @@ test("at most the configured connections to a host are open at once", async () =
   let open = 0, peak = 0;
   origin.behave = (_req, res) => { open++; peak = Math.max(peak, open); setTimeout(() => { open--; res.end("x"); }, 30); return true; };
   try {
-    const i = new Input(bases, { test: true, sleep, connections: 3 });
+    const i = new Input(bases, { test: true, sleep, connections: 3, ccRate: Infinity });
     await Promise.all(Array.from({ length: 9 }, (_, k) => i.readAll(`${origin.origin}/archive/c${k}`, 10)));
     assert.equal(peak, 3);
     i.close();

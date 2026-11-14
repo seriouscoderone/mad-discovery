@@ -33,7 +33,7 @@ test("the stranger, by fixture: two sources that never link, named in a WARC fix
       { uri: "http://plain.example/robots.txt", status: 200, body: "User-agent: *\nDisallow:\n" },
       { uri: "http://alpha.example/robots.txt", status: 200, body: `Mad-Source: ${aAddr}\n`, date: "2026-01-02T00:00:00Z" },
     ]));
-    const finderInputs = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0 };
+    const finderInputs = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, ccRate: Infinity };
     const candidates = join(mkdtempSync(join(tmpdir(), "stranger-")), "candidates");
     let c = capture();
     assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", candidates, "--snapshot", SNAP], c.io, { test: true, finderInputs }), 0, c.out() + c.err());
