@@ -1,0 +1,10 @@
+{
+  "total_count": 4,
+  "incomplete_results": false,
+  "items": [
+    { "id": 1, "full_name": "alice/mad-definitions", "html_url": "https://github.com/alice/mad-definitions", "homepage": "https://alice.github.io/mad-definitions/source.json", "topics": ["mad-source", "keri"], "archived": false, "fork": false },
+    { "id": 2, "full_name": "bob/protocols", "html_url": "https://github.com/bob/protocols", "homepage": "https://protocols.bob.example/source.json", "topics": ["mad-source"], "archived": false, "fork": false },
+    { "id": 3, "full_name": "carol/one-definition", "html_url": "https://github.com/carol/one-definition", "homepage": "https://carol.example/definitions/EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY.json", "topics": ["mad-source"], "archived": false, "fork": false },
+    { "id": 4, "full_name": "dave/empty", "html_url": "https://github.com/dave/empty", "homepage": null, "topics": ["mad-source"], "archived": true, "fork": false }
+  ]
+}
