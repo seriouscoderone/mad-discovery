@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, statSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { readFileSync, mkdirSync, lstatSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { isSaid, checkSaid, saidOf, replaceAll, FILL } from "./said.ts";
 import { parseConfig, ConfigError } from "./config.ts";
@@ -15,7 +15,7 @@ import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
 import { buildCatalog, readCandidateFile, toolCommit } from "./catalog.ts";
 import { candidateFileBytes, type CandidateFile, type FinderResult } from "./finders/candidates.ts";
-import { Input, PUBLIC_INPUTS, type InputBases } from "./finders/input.ts";
+import { Input, InputError, PUBLIC_INPUTS, type InputBases } from "./finders/input.ts";
 import { listCrawls, robotsFinder, CRAWL } from "./finders/robots.ts";
 import { githubFinder } from "./finders/github.ts";
 import { FolderJournal } from "./finders/journal.ts";
@@ -49,9 +49,15 @@ function flag(args: string[], name: string): string | undefined {
   return value === undefined || value.startsWith("--") ? undefined : value;
 }
 
-function flags(args: string[], name: string): string[] {
+/** Every value of a repeatable flag, or null when any occurrence has none (missing, or the next argument is another flag). */
+function flags(args: string[], name: string): string[] | null {
   const out: string[] = [];
-  args.forEach((a, i) => { const v = args[i + 1]; if (a === name && v !== undefined && !v.startsWith("--")) out.push(v); });
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== name) continue;
+    const v = args[i + 1];
+    if (v === undefined || v.startsWith("--")) return null;
+    out.push(v);
+  }
   return out;
 }
 
@@ -225,6 +231,7 @@ async function catalog(args: string[], io: Io, options: RunOptions): Promise<num
   const out = flag(rest, "--out");
   const from = flags(rest, "--from");
   const candidatePaths = flags(rest, "--candidates");
+  if (from === null || candidatePaths === null) return usage(io, "--from and --candidates each need a value.");
   if (out === undefined || (from.length === 0 && candidatePaths.length === 0)) return usage(io, "catalog build needs --out and at least one --from or --candidates.");
   for (const f of from) if (parseSourceAddress(f, { test: options.test }) === null) return usage(io, FROM_NOTE);
   const outProblem = outDirProblem(out);
@@ -249,14 +256,14 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
   const finder = flag(args, "--finder");
   const out = flag(args, "--out");
   const named = flags(args, "--snapshot");
+  if (named === null) return usage(io, "--snapshot needs a crawl name.");
   if ((finder !== "robots" && finder !== "github") || out === undefined) return usage(io, "catalog find needs --finder robots or github, and --out.");
   if (finder === "github" && named.length > 0) return usage(io, "the GitHub finder has no snapshots: its file is named by the day it runs.");
-  if (args.filter((a) => a === "--snapshot").length !== named.length) return usage(io, "--snapshot needs a crawl name.");
   for (const s of named) if (!CRAWL.test(s)) return usage(io, `not a crawl name: ${s.length > 64 ? s.slice(0, 64) : s}`);
   const { archive, index, github } = options.finderInputs ?? PUBLIC_INPUTS;
-  const input = new Input({ archive, index, github }, { test: options.finderInputs !== undefined, pause: options.finderInputs?.pause });
+  const input = new Input({ archive, index, github }, { test: options.test === true, pause: options.finderInputs?.pause });
   try {
-    let snapshots = named;
+    let snapshots = [...new Set(named)];
     if (finder === "github") snapshots = [options.finderInputs?.today ?? new Date().toISOString().slice(0, 10)];
     else if (snapshots.length === 0) {
       try { snapshots = (await listCrawls(input)).slice(0, 3); }
@@ -270,7 +277,7 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
     for (const snapshot of snapshots) {
       const path = join(folder, `${snapshot}.json`);
       let existing: "file" | "other" | "none" = "none";
-      try { existing = statSync(path).isFile() ? "file" : "other"; } catch { /* absent */ }
+      try { existing = lstatSync(path).isFile() ? "file" : "other"; } catch { /* absent */ }
       if (existing === "other") { failed.push({ snapshot, reason: "the candidate file path is not a file" }); continue; }
       if (existing === "file") {   // the output folder is the one thing kept between runs
         kept.push(snapshot);
@@ -298,7 +305,7 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
         written.push(snapshot);
         summary[snapshot] = result.summary;
       } catch (e) {
-        const reason = typeof e === "object" && e !== null && "reason" in e && typeof (e as { reason: unknown }).reason === "string" ? (e as { reason: string }).reason : e instanceof Error ? e.message : "error";
+        const reason = e instanceof InputError ? (e.status !== undefined ? `${e.reason} ${e.status}` : e.reason) : e instanceof Error ? e.message : "error";
         failed.push({ snapshot, reason });
       }
     }
