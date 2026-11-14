@@ -184,7 +184,9 @@ export class Input {
         if (this.pausedUntil === target) break;
         target = this.pausedUntil;
       }
+      const seen = this.pausedUntil;
       await this.paced(url);
+      if (this.pausedUntil !== seen && this.pausedUntil - this.now() > 0) continue;   // a slow-down began while this start waited its turn: wait it out, no retry spent
       let res: http.IncomingMessage | null = null;
       try { res = await this.once(url, headers); } catch (e) {
         last = e instanceof InputError ? e : new InputError(url, "unreachable");

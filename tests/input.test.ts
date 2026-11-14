@@ -244,7 +244,7 @@ const pacedClock = () => {
   let t = 0;
   const starts: number[] = [];
   const sleep = async (ms: number) => { const end = t + ms; starts.push(end); await new Promise((r) => setImmediate(r)); t = Math.max(t, end); };
-  return { starts, now: () => t, sleep };
+  return { starts, now: () => t, sleep, advance: (ms: number) => { t += ms; } };
 };
 const spacing = (starts: number[]) => { const all = [0, ...[...starts].sort((a, b) => a - b)]; return all.slice(1).map((s, k) => s - all[k]!); };   // the first start is at 0
 
@@ -283,6 +283,64 @@ test("requests to GitHub are not paced by Common Crawl's rate", async () => {
     const i = new Input(bases, { test: true, now: c.now, sleep: c.sleep, ccRate: 5 });
     await Promise.all(Array.from({ length: 10 }, (_, k) => i.readAll(`${origin.origin}/github/r${k}`, 10)));
     assert.deepEqual(c.starts, [], "no sleeps");
+    i.close();
+  } finally { origin.behave = null; }
+});
+
+test("after an idle gap the next start goes out at once, and the ones queued behind it are one spacing apart", async () => {
+  origin.behave = (req, res) => { if (req.url?.startsWith("/archive/g")) { res.end("x"); return true; } return false; };
+  try {
+    const c = pacedClock();
+    const i = new Input(bases, { test: true, now: c.now, sleep: c.sleep, ccRate: 5 });
+    await i.readAll(`${origin.origin}/archive/g`, 10);
+    c.advance(10_000);   // idle for ten seconds: the slot after the first start is long past
+    await Promise.all(Array.from({ length: 5 }, (_, k) => i.readAll(`${origin.origin}/archive/g${k}`, 10)));
+    assert.deepEqual(c.starts, [10_200, 10_400, 10_600, 10_800], "the first of the five at once, the other four 200 ms apart from it");
+    i.close();
+  } finally { origin.behave = null; }
+});
+
+/**
+ * A clock that moves only when the test lets it: each step lets the sockets settle (real time), then wakes the earliest sleeper and
+ * moves the clock to the end of its sleep. A request the origin sees is stamped with the clock it was sent at.
+ */
+const steppedClock = () => {
+  let t = 0;
+  const sleepers: { end: number; wake: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((wake) => { sleepers.push({ end: t + ms, wake }); });
+  const run = async (work: Promise<unknown>) => {
+    let done = false;
+    work.then(() => { done = true; }, () => { done = true; });
+    while (!done) {
+      await new Promise((r) => setTimeout(r, 30));
+      if (sleepers.length === 0) continue;
+      sleepers.sort((a, b) => a.end - b.end);
+      const next = sleepers.shift()!;
+      t = Math.max(t, next.end);
+      next.wake();
+    }
+    return work;
+  };
+  return { now: () => t, sleep, run };
+};
+
+test("a start that waited its turn does not go out into a slow-down that began while it waited", async () => {
+  let first = true;
+  const sent: [string, number][] = [];
+  const c = steppedClock();
+  origin.behave = (req, res) => {
+    if (!req.url?.startsWith("/archive/s")) return false;
+    sent.push([req.url, c.now()]);
+    if (first) { first = false; res.statusCode = 403; res.end(); return true; }
+    res.end("ok"); return true;
+  };
+  try {
+    const i = new Input(bases, { test: true, now: c.now, sleep: c.sleep, ccRate: 5, pause: 1000 });
+    await c.run(Promise.all(Array.from({ length: 6 }, (_, k) => i.readAll(`${origin.origin}/archive/s${k}`, 10))));
+    assert.deepEqual(sent[0], ["/archive/s0", 0], "the first start, answered 403: a pause until 1000");
+    const inside = sent.slice(1).filter(([, at]) => at < 1000);
+    assert.deepEqual(inside, [], "no request reached the origin inside the pause");
+    assert.equal(sent.length, 7, "six files, one of them tried twice");
     i.close();
   } finally { origin.behave = null; }
 });
