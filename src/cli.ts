@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { isSaid, checkSaid, saidOf, replaceAll, FILL } from "./said.ts";
 import { parseConfig, ConfigError } from "./config.ts";
 import { readInputs } from "./inputs.ts";
@@ -13,13 +14,22 @@ import { readSourceDocument } from "./document.ts";
 import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
 import { buildCatalog, readCandidateFile, toolCommit } from "./catalog.ts";
-import type { CandidateFile } from "./finders/candidates.ts";
+import { candidateFileBytes, type CandidateFile, type FinderResult } from "./finders/candidates.ts";
+import { Input, PUBLIC_INPUTS, type InputBases } from "./finders/input.ts";
+import { listCrawls, robotsFinder, CRAWL } from "./finders/robots.ts";
+import { githubFinder } from "./finders/github.ts";
+import { FolderJournal } from "./finders/journal.ts";
 import { Robots } from "./robots.ts";
 import { illFormedStrings } from "./scan.ts";
 
 export type Io = { out: (s: string) => void; err: (s: string) => void };
 /** test, resolve and limits exist for the tests; the bin passes none, so a local origin is never a source outside a test. */
-export type RunOptions = { test?: boolean; resolve?: Resolve; limits?: Limits };
+export type RunOptions = {
+  test?: boolean;
+  resolve?: Resolve;
+  limits?: Limits;
+  finderInputs?: InputBases & { pause?: number; today?: string };   // test code only: local origins standing for the public inputs
+};
 
 const FROM_NOTE = "--from must be a source address: https, a DNS name, a path ending in /source.json.";
 
@@ -29,6 +39,7 @@ const USAGE = `usage:
   mad-discovery verify <source address>
   mad-discovery who <SAID> --from <source address> [--catalog <catalog address>]
   mad-discovery get <SAID> --from <source address> --out <folder>
+  mad-discovery catalog find --finder <robots|github> --out <folder> [--snapshot <name>]...
   mad-discovery catalog build --out <folder> [--candidates <file>]... [--from <source address>]...
 Every command prints JSON on standard output. Exit 0: success. 1: failure. 2: usage.`;
 
@@ -209,7 +220,7 @@ async function bringHome(args: string[], io: Io, options: RunOptions): Promise<n
 
 async function catalog(args: string[], io: Io, options: RunOptions): Promise<number> {
   const [sub, ...rest] = args;
-  if (sub === "find") return usage(io, "catalog find arrives with the finders (step 6).");
+  if (sub === "find") return await find(rest, io, options);
   if (sub !== "build") return usage(io);
   const out = flag(rest, "--out");
   const from = flags(rest, "--from");
@@ -232,4 +243,64 @@ async function catalog(args: string[], io: Io, options: RunOptions): Promise<num
   writeFiles(r.files, out);
   io.out(asciiJson({ written: r.files.size, ...r.summary, from: from.length, candidates: candidates.length }) + "\n");
   return 0;
+}
+
+const SNAPSHOT_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/;   // a snapshot name becomes a file name (the build's rule for a candidate file)
+
+async function find(args: string[], io: Io, options: RunOptions): Promise<number> {
+  const finder = flag(args, "--finder");
+  const out = flag(args, "--out");
+  const named = flags(args, "--snapshot");
+  if ((finder !== "robots" && finder !== "github") || out === undefined) return usage(io, "catalog find needs --finder robots or github, and --out.");
+  if (finder === "github" && named.length > 0) return usage(io, "the GitHub finder has no snapshots: its file is named by the day it runs.");
+  for (const s of named) if (!CRAWL.test(s) || !SNAPSHOT_NAME.test(s)) return usage(io, `not a crawl name: ${s.length > 64 ? s.slice(0, 64) : s}`);
+  const { archive, index, github } = options.finderInputs ?? PUBLIC_INPUTS;
+  const input = new Input({ archive, index, github }, { test: options.finderInputs !== undefined, pause: options.finderInputs?.pause });
+  try {
+    let snapshots = named;
+    if (finder === "github") snapshots = [options.finderInputs?.today ?? new Date().toISOString().slice(0, 10)];
+    else if (snapshots.length === 0) {
+      try { snapshots = (await listCrawls(input)).slice(0, 3); }
+      catch { io.out(asciiJson({ problems: ["the crawl list could not be read; name the crawls with --snapshot"] }) + "\n"); return 1; }
+    }
+    const folder = join(out, finder);
+    mkdirSync(folder, { recursive: true });
+    const written: string[] = [], kept: string[] = [], failed: { snapshot: string; reason: string }[] = [];
+    const summary: Record<string, Record<string, number>> = {};
+    const resumed: Record<string, number> = {};
+    for (const snapshot of snapshots) {
+      const path = join(folder, `${snapshot}.json`);
+      if (existsSync(path)) {   // the output folder is the one thing kept between runs
+        kept.push(snapshot);
+        if (finder === "robots") {   // a run killed after its rename
+          try { rmSync(join(folder, `${snapshot}.progress`), { recursive: true, force: true }); } catch { io.err(`${snapshot}: the journal folder could not be removed\n`); }
+        }
+        continue;
+      }
+      let journal: FolderJournal | null = null;
+      try {
+        if (finder === "robots") journal = new FolderJournal(join(folder, `${snapshot}.progress`), { test: options.test });   // kept between runs, like the folder
+        let last = 0;
+        const progress = (done: number, total: number): void => { if (done - last >= 1000 || done === total) { last = done; io.err(`${snapshot}: ${done}/${total} files\n`); } };
+        const listing = (files: number): void => {
+          const mb = Math.round(files * 1.5);   // 1.4 to 1.6 MB a file, measured 2026-11-12
+          io.err(`${snapshot}: ${files} archive files to read, about ${mb >= 1000 ? `${Math.round(mb / 1000)} GB` : `${Math.max(1, mb)} MB`}\n`);
+        };
+        const result: FinderResult = journal !== null ? await robotsFinder(snapshot, input, { test: options.test }, { progress, listing, journal }) : await githubFinder(input, snapshot, { test: options.test });
+        writeFileSync(`${path}.part`, candidateFileBytes(result));
+        renameSync(`${path}.part`, path);   // whole or absent: a killed run leaves no half file to be kept
+        if (journal !== null) {
+          if (journal.reused > 0) resumed[snapshot] = journal.reused;
+          try { journal.remove(); } catch { io.err(`${snapshot}: the journal folder could not be removed\n`); }
+        }
+        written.push(snapshot);
+        summary[snapshot] = result.summary;
+      } catch (e) {
+        const reason = typeof e === "object" && e !== null && "reason" in e && typeof (e as { reason: unknown }).reason === "string" ? (e as { reason: string }).reason : e instanceof Error ? e.message : "error";
+        failed.push({ snapshot, reason });
+      }
+    }
+    io.out(asciiJson({ finder, written, kept, failed, summary, resumed }) + "\n");
+    return failed.length === 0 ? 0 : 1;
+  } finally { input.close(); }
 }

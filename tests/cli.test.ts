@@ -5,12 +5,14 @@ import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { main, type Io } from "../src/cli.ts";
 import { asciiJson } from "../src/json.ts";
 import { readInputs } from "../src/inputs.ts";
 import { saidOf } from "../src/said.ts";
 import { WALK, CATALOG } from "../src/limits.ts";
 import { Origin } from "./helpers/servers.ts";
+import { warcGz, SAMPLE_CAPTURES } from "./helpers/warc.ts";
 
 const bin = fileURLToPath(new URL("../bin/mad-discovery.ts", import.meta.url));
 const fixtures = fileURLToPath(new URL("../fixtures/", import.meta.url));
@@ -264,10 +266,10 @@ test("verify of a file says nothing about browsers: no answer, no header", () =>
   assert.ok(!("browserWallets" in r.json));
 });
 
-test("the usage names five commands", () => {
+test("the usage names six commands", () => {
   const r = run();
   assert.equal(r.code, 2);
-  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "verify <source address>", "who <SAID> --from <source address> [--catalog <catalog address>]", "get <SAID> --from <source address> --out <folder>", "catalog build --out <folder> [--candidates <file>]... [--from <source address>]..."]) assert.ok(r.err.includes(cmd), cmd);
+  for (const cmd of ["build <folder>", "verify <file or address> <SAID>", "verify <source address>", "who <SAID> --from <source address> [--catalog <catalog address>]", "get <SAID> --from <source address> --out <folder>", "catalog find --finder <robots|github> --out <folder> [--snapshot <name>]...", "catalog build --out <folder> [--candidates <file>]... [--from <source address>]..."]) assert.ok(r.err.includes(cmd), cmd);
 });
 
 test("an out folder filled during the run is a reported failure, never a crash", async () => {
@@ -345,7 +347,7 @@ test("catalog build writes a catalog from --from sources and reports; usage and 
     assert.equal(await main(["catalog", "build", "--out", out, "--from", aAddr], c.io, catalogLocal), 1, "the out folder is not empty now");
     assert.deepEqual(c.json(), { problems: [`${out} is not empty`] });
     const requests = a.requests.length;
-    for (const args of [["catalog"], ["catalog", "find", "--finder", "robots", "--out", out], ["catalog", "build", "--out", join(out, "x")], ["catalog", "build", "--out", join(out, "x"), "--from", "https://1.2.3.4/source.json"], ["catalog", "build", "--out", join(out, "y"), "--from", aAddr, "--from", "https://1.2.3.4/source.json"]]) {
+    for (const args of [["catalog"], ["catalog", "build", "--out", join(out, "x")], ["catalog", "build", "--out", join(out, "x"), "--from", "https://1.2.3.4/source.json"], ["catalog", "build", "--out", join(out, "y"), "--from", aAddr, "--from", "https://1.2.3.4/source.json"]]) {
       c = capture();
       assert.equal(await main(args, c.io, catalogLocal), 2, args.join(" "));
       assert.equal(c.out(), "");
@@ -466,4 +468,84 @@ test("build warns about inputs that hold lone surrogates and writes them unchang
   assert.equal(r.code, 0, r.out + r.err);
   assert.deepEqual(r.json.warnings, [{ said: LONE, illFormed: 2 }]);
   assert.deepEqual(readFileSync(join(out, "definitions", `${LONE}.json`)), readFileSync(join(dir, `${LONE}.json`)), "the bytes as given");
+});
+
+test("catalog find writes one candidate file per snapshot, keeps files already there, names what failed, and fetches no candidate's address", async () => {
+  const cc = await Origin.start();
+  try {
+    const SNAP = "CC-MAIN-2026-43";
+    const bases = { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" };
+    const opts = { ...local, finderInputs: bases };
+    const paths = (snap: string, names: string[]) => gzipSync(Buffer.from(names.map((n) => `crawl-data/${snap}/segments/1.2/robotstxt/${n}`).join("\n") + "\n"));
+    cc.put("index/collinfo.json", JSON.stringify([{ id: "CC-MAIN-2026-43" }, { id: "CC-MAIN-2026-39" }, { id: "CC-MAIN-2026-34" }, { id: "CC-MAIN-2026-30" }]));
+    for (const snap of ["CC-MAIN-2026-43", "CC-MAIN-2026-39"]) {
+      cc.put(`archive/crawl-data/${snap}/robotstxt.paths.gz`, paths(snap, ["a.warc.gz"]));
+      cc.put(`archive/crawl-data/${snap}/segments/1.2/robotstxt/a.warc.gz`, warcGz(SAMPLE_CAPTURES));
+    }
+    // CC-MAIN-2026-34 has two files and the second is missing (answered late, so the first finishes): that snapshot fails, the others are written.
+    cc.put("archive/crawl-data/CC-MAIN-2026-34/robotstxt.paths.gz", paths("CC-MAIN-2026-34", ["a.warc.gz", "gone.warc.gz"]));
+    cc.put("archive/crawl-data/CC-MAIN-2026-34/segments/1.2/robotstxt/a.warc.gz", warcGz(SAMPLE_CAPTURES));
+    cc.behave = (req, res) => { if (req.url?.endsWith("/CC-MAIN-2026-34/segments/1.2/robotstxt/gone.warc.gz")) { setTimeout(() => { res.statusCode = 404; res.end(); }, 150); return true; } return false; };
+    const out = join(mkdtempSync(join(tmpdir(), "find-")), "candidates");
+    let c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", out], c.io, opts), 1, "one of the three newest failed");
+    cc.behave = null;
+    let r = c.json();
+    assert.deepEqual(r.written, ["CC-MAIN-2026-43", "CC-MAIN-2026-39"]); assert.deepEqual(r.kept, []);
+    assert.deepEqual((r.failed as { snapshot: string; reason: string }[]).map((f) => f.snapshot), ["CC-MAIN-2026-34"]);
+    assert.equal((r.failed as { reason: string }[])[0]!.reason, "status");
+    assert.ok(existsSync(join(out, "robots", `${SNAP}.json`)) && !existsSync(join(out, "robots", "CC-MAIN-2026-34.json")) && !existsSync(join(out, "robots", "CC-MAIN-2026-34.json.part")));
+    const text = readFileSync(join(out, "robots", `${SNAP}.json`), "utf8");
+    const file = JSON.parse(text) as { finder: string; snapshot: string; candidates: { address: string }[]; summary: Record<string, number> };
+    assert.equal(file.finder, "robots"); assert.equal(file.snapshot, SNAP); assert.equal(file.candidates.length, 5); assert.equal(file.summary["files"], 1); assert.equal(file.summary["notAddresses"], 1);
+    for (let i = 0; i < text.length; i++) { const code = text.charCodeAt(i); assert.ok(code === 10 || (code >= 32 && code <= 126), "ASCII"); }
+    assert.ok(c.err().includes(`${SNAP}: 1 archive files to read, about 2 MB`), "the size, announced on stderr");
+    assert.ok(c.err().includes(`${SNAP}: 1/1 files`), "progress on stderr");
+    assert.ok(!existsSync(join(out, "robots", `${SNAP}.progress`)), "the journal is removed once the file is written");
+    assert.ok(existsSync(join(out, "robots", "CC-MAIN-2026-34.progress", "0.json")), "and kept after a failure, with the file that finished, so the next run resumes");
+    assert.deepEqual(r.resumed, {});
+    assert.ok(cc.requests.every((p) => p.startsWith("index/") || p.startsWith("archive/")), "only the public input was asked");
+    // The failed crawl's file appears: the next run reads it, writes its candidate file and removes its journal.
+    cc.put("archive/crawl-data/CC-MAIN-2026-34/segments/1.2/robotstxt/gone.warc.gz", warcGz(SAMPLE_CAPTURES));
+    const before34 = cc.requests.length;
+    c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", out, "--snapshot", "CC-MAIN-2026-34"], c.io, opts), 0);
+    assert.deepEqual(c.json().written, ["CC-MAIN-2026-34"]);
+    assert.deepEqual(c.json().resumed, { "CC-MAIN-2026-34": 1 }, "the finished file came from the journal");
+    assert.deepEqual(cc.requests.slice(before34), ["archive/crawl-data/CC-MAIN-2026-34/robotstxt.paths.gz", "archive/crawl-data/CC-MAIN-2026-34/segments/1.2/robotstxt/gone.warc.gz"], "only the listing and the missing file");
+    assert.ok(!existsSync(join(out, "robots", "CC-MAIN-2026-34.progress")));
+    // A second run keeps the two files and reads nothing for them.
+    const before = cc.requests.length;
+    c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", out, "--snapshot", SNAP, "--snapshot", "CC-MAIN-2026-39"], c.io, opts), 0);
+    r = c.json(); assert.deepEqual(r.kept, [SNAP, "CC-MAIN-2026-39"]); assert.deepEqual(r.written, []);
+    assert.equal(cc.requests.length, before, "kept snapshots cost no request");
+    // GitHub: named by the day; kept the second time; one request.
+    cc.behave = (req, res) => { if (req.url?.startsWith("/github/search/repositories")) { res.setHeader("content-type", "application/json"); res.end(readFileSync(join(fixtures, "github", "search-sample.json"))); return true; } return false; };
+    const beforeGithub = cc.requests.length;
+    c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "github", "--out", out], c.io, opts), 0);
+    assert.deepEqual(c.json().written, ["2026-11-12"]);
+    assert.deepEqual(cc.requests.slice(beforeGithub), ["github/search/repositories?q=topic%3Amad-source&per_page=100&page=1"], "one request, to GitHub only");
+    const gh = JSON.parse(readFileSync(join(out, "github", "2026-11-12.json"), "utf8")) as { candidates: { address: string }[] };
+    assert.deepEqual(gh.candidates.map((x) => x.address), ["https://alice.github.io/mad-definitions/source.json", "https://protocols.bob.example/source.json"]);
+    c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "github", "--out", out], c.io, opts), 0);
+    assert.deepEqual(c.json().kept, ["2026-11-12"]);
+    // The crawl list unreadable: a named problem, nothing else fetched.
+    cc.behave = (req, res) => { if (req.url === "/index/collinfo.json") { res.statusCode = 500; res.end(); return true; } return false; };
+    const out2 = join(mkdtempSync(join(tmpdir(), "find-")), "c");
+    const requests = cc.requests.length;
+    c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", out2], c.io, opts), 1);
+    assert.deepEqual(c.json(), { problems: ["the crawl list could not be read; name the crawls with --snapshot"] });
+    assert.equal(cc.requests.slice(requests).filter((p) => !p.startsWith("index/")).length, 0);
+    // Usage.
+    const usageBefore = cc.requests.length;
+    for (const args of [["catalog", "find"], ["catalog", "find", "--finder", "bing", "--out", out2], ["catalog", "find", "--finder", "robots"], ["catalog", "find", "--finder", "github", "--out", out2, "--snapshot", "2026-11-12"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot", "../x"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot", "CC-MAIN-2026-43", "--snapshot", "x"]]) {
+      c = capture();
+      assert.equal(await main(args, c.io, opts), 2, args.join(" ")); assert.equal(c.out(), "");
+    }
+    assert.equal(cc.requests.length, usageBefore, "usage errors fetch nothing");
+  } finally { cc.behave = null; await cc.close(); }
 });
