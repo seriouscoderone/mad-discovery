@@ -220,18 +220,23 @@ test("verify over an address says whether browser wallets can read the file, and
   } finally { a.behave = null; await a.close(); }
 });
 
-test("verify asks as a browser would: a host that sends the header only to a request with Origin is reported readable", async () => {
+test("verify asks as a wallet does: Origin and the no-store cache headers; a host that drops the header for that request is reported unreadable", async () => {
   const a = await Origin.start();
   try {
     a.source("mad/", { serve: [SELECTION] }, compactInputs);
     const definition = `${a.origin}/mad/definitions/${SELECTION}.json`;
-    const origins: unknown[] = [];
-    // As CloudFront's SimpleCORS policy does: the header only when the request carries Origin.
-    a.behave = (req, res) => { origins.push(req.headers.origin); if (req.headers.origin !== undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
+    const asked: unknown[] = [];
+    // As CloudFront's SimpleCORS policy does (GitHub #5): the header when the request carries Origin and no cache headers.
+    a.behave = (req, res) => { asked.push([req.headers.origin, req.headers["cache-control"], req.headers.pragma]); if (req.headers.origin !== undefined && req.headers["cache-control"] === undefined && req.headers.pragma === undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
+    const s = capture();
+    assert.equal(await main(["verify", definition, SELECTION], s.io, local), 0);
+    assert.equal(s.json().browserWallets, CANNOT_READ, "a wallet's request gets no header from this host");
+    assert.deepEqual(asked, [["https://wallet.invalid", "no-cache", "no-cache"]]);
+    // A host that sends the header on every answer with Origin, whatever else the request carries.
+    a.behave = (req, res) => { if (req.headers.origin !== undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
     const c = capture();
     assert.equal(await main(["verify", definition, SELECTION], c.io, local), 0);
     assert.deepEqual(c.json(), { verified: true, said: SELECTION, address: definition, bytes: compactInputs.get(SELECTION)!.length, browserWallets: CAN_READ });
-    assert.deepEqual(origins, ["https://wallet.invalid"]);
     // A host that echoes the request's origin back allows that one origin, not every wallet.
     a.behave = (req, res) => { if (typeof req.headers.origin === "string") res.setHeader("access-control-allow-origin", req.headers.origin); return false; };
     const e = capture();
@@ -383,14 +388,19 @@ test("verify over a source document address: readable as a source exits 0 and re
     let c = capture();
     assert.equal(await main(["verify", address], c.io, local), 0, "absence of the header is not a failure");
     assert.deepEqual(c.json(), { source: address, document: "ok", serves: plan.document.serves.length, publications: 0, introductions: 0, dropped: { entries: 0, publications: 0 }, browserWallets: CANNOT_READ });
-    // As CloudFront's SimpleCORS policy does: the header only when the request carries Origin.
-    const origins: unknown[] = [];
-    a.behave = (req, res) => { origins.push(req.headers.origin); if (req.headers.origin !== undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
+    // As CloudFront's SimpleCORS policy does (GitHub #5): the header only when the request carries Origin and no cache headers.
+    const asked: unknown[] = [];
+    a.behave = (req, res) => { asked.push([req.headers.origin, req.headers["cache-control"], req.headers.pragma]); if (req.headers.origin !== undefined && req.headers["cache-control"] === undefined && req.headers.pragma === undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
+    c = capture();
+    assert.equal(await main(["verify", address], c.io, local), 0);
+    assert.equal(c.json().browserWallets, CANNOT_READ);
+    assert.deepEqual(asked, [["https://wallet.invalid", "no-cache", "no-cache"]], "one request, asked as a wallet does");
+    // A host that sends the header to every request with Origin.
+    a.behave = (req, res) => { if (req.headers.origin !== undefined) res.setHeader("access-control-allow-origin", "*"); return false; };
     c = capture();
     assert.equal(await main(["verify", address], c.io, local), 0);
     assert.equal(c.json().document, "ok");
     assert.equal(c.json().browserWallets, CAN_READ);
-    assert.deepEqual(origins, ["https://wallet.invalid"], "one request, asked as a browser would");
     a.behave = null;
     // Nothing served there: the fetch outcome, no browserWallets.
     const missing = `${a.origin}/gone/source.json`;

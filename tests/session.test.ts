@@ -161,9 +161,9 @@ test("asking whether a host is used up records nothing about it", () => {
   assert.equal((s as unknown as { hosts: Map<string, unknown> }).hosts.size, 0);
 });
 
-test("fetch takes its modes in one object: the text mode passes through and is charged like any request; asBrowser adds Origin", async () => {
-  let sawOrigin: string | undefined;
-  origin.behave = (req, res) => { sawOrigin = req.headers.origin; if (req.url === "/robots.txt") { res.setHeader("content-type", "text/plain"); res.end("User-agent: *\nDisallow:\n"); return true; } return false; };
+test("fetch takes its modes in one object: the text mode passes through and is charged like any request; asBrowser adds the wallet's headers", async () => {
+  let sawOrigin: string | undefined, sawCache: unknown[] = [];
+  origin.behave = (req, res) => { sawOrigin = req.headers.origin; sawCache = [req.headers["cache-control"], req.headers.pragma]; if (req.url === "/robots.txt") { res.setHeader("content-type", "text/plain"); res.end("User-agent: *\nDisallow:\n"); return true; } return false; };
   try {
     const s = new Session(limits({}), { test: true });
     const r = await s.fetch(url("robots.txt"), { type: "text" });
@@ -173,6 +173,7 @@ test("fetch takes its modes in one object: the text mode passes through and is c
     assert.equal((await s.fetch(url("robots.txt"))).outcome, "invalid", "as json, text/plain is refused");
     assert.equal((await s.fetch(url("x.json"), { asBrowser: true })).outcome, "ok");
     assert.equal(sawOrigin, "https://wallet.invalid");
+    assert.deepEqual(sawCache, ["no-cache", "no-cache"]);
   } finally { origin.behave = null; }
 });
 

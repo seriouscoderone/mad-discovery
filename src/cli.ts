@@ -112,7 +112,8 @@ function illFormed(bytes: Uint8Array): { wellFormed?: false; illFormed?: number 
 const isAddress = (s: string): boolean => /^https?:\/\//i.test(s);
 
 /**
- * Asks as a browser would, with an Origin header: a host may send Access-Control-Allow-Origin only to such a request. One request.
+ * Asks as a wallet does (BROWSER_HEADERS: Origin, Cache-Control: no-cache, Pragma: no-cache): a host may send Access-Control-Allow-Origin
+ * only to a request with Origin, and may drop it for one that carries the cache headers. One request.
  * `browserWallets` is information for the operator, never a failure: a source need not be readable from a browser.
  */
 async function fetchAsBrowser(address: string, options: RunOptions) {

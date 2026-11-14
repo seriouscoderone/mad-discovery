@@ -51,11 +51,11 @@ test("a request carries exactly the headers it always did, and no Origin", async
   assert.deepEqual(seen, sentHeaders(new URL(origin.origin).host));
 });
 
-test("asked to fetch as a browser would, a request also carries Origin: https://wallet.invalid, and nothing else changes", async () => {
+test("asked to fetch as a wallet does, a request also carries Origin: https://wallet.invalid and the no-store cache headers, and nothing else changes", async () => {
   let seen: Record<string, unknown> | null = null;
   origin.behave = (req) => { seen = { ...req.headers }; return false; };
   assert.equal((await fetchLocal("x.json", { asBrowser: true })).outcome, "ok");
-  assert.deepEqual(seen, { ...sentHeaders(new URL(origin.origin).host), origin: "https://wallet.invalid" });
+  assert.deepEqual(seen, { ...sentHeaders(new URL(origin.origin).host), origin: "https://wallet.invalid", "cache-control": "no-cache", pragma: "no-cache" });
 });
 
 test("content types: application/json and +json pass, others are invalid", async () => {
