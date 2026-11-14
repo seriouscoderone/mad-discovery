@@ -166,6 +166,42 @@ test("onThrottle is told the host, the status and the pause each time a host say
   } finally { origin.behave = null; }
 });
 
+test("one pause is reported once, however many answers arrive inside it; a Retry-After that extends it is reported again", async () => {
+  const seen: Record<string, number> = {};
+  origin.behave = (req, res) => {
+    const u = req.url ?? ""; seen[u] = (seen[u] ?? 0) + 1;
+    if (u.startsWith("/archive/wave") && seen[u] === 1) { res.statusCode = 403; res.end(); return true; }
+    if (u === "/archive/longer" && seen[u] === 1) { res.statusCode = 429; res.setHeader("retry-after", "7"); res.end(); return true; }
+    if (u.startsWith("/archive/")) { res.end("ok"); return true; }
+    return false;
+  };
+  try {
+    const told: [string, number, number][] = [];
+    const j = new Input(bases, { test: true, now: () => 0, sleep: async () => {}, onThrottle: (h: string, s: number, ms: number) => { told.push([h, s, ms]); } });
+    const host = new URL(origin.origin).hostname;
+    await Promise.all(Array.from({ length: 16 }, (_, k) => j.readAll(`${origin.origin}/archive/wave${k}`, 10)));
+    assert.deepEqual(told, [[host, 403, 1000]], "sixteen workers blocked together: one line");
+    await j.readAll(`${origin.origin}/archive/longer`, 10);
+    assert.deepEqual(told.at(-1), [host, 429, 7000], "a pause extended by a Retry-After is reported again");
+    assert.equal(told.length, 2);
+    j.close();
+  } finally { origin.behave = null; }
+});
+
+test("slow-downs and faults have separate budgets: an archive URL answering 403 and 500 alternately is tried 18 times, then fails", async () => {
+  let n = 0;
+  origin.behave = (req, res) => {
+    if (req.url !== "/archive/alternating") return false;
+    res.statusCode = n++ % 2 === 0 ? 403 : 500; res.end(); return true;
+  };
+  try {
+    const i = input();
+    await assert.rejects(i.open(`${origin.origin}/archive/alternating`), reason("status", 500));
+    assert.equal(n, 18, "9 slow-downs, 8 retried faults and the final fault");
+    i.close();
+  } finally { origin.behave = null; }
+});
+
 test("Retry-After in seconds is honoured up to two minutes, and a host's slow-down pauses every request of the input", async () => {
   let calls: Record<string, number> = {};
   origin.behave = (req, res) => {

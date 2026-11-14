@@ -190,8 +190,9 @@ export class Input {
         if (throttles >= THROTTLE_RETRIES) throw last;
         const delay = after === null ? this.backoff(throttles) : Math.max(after, this.pause);   // Retry-After never brings a retry under the one-pause floor
         throttles++;
-        this.pausedUntil = Math.max(this.pausedUntil, this.now() + delay);   // waited out at the top of the next try
-        this.onThrottle(new URL(url).hostname, status, delay);
+        const until = this.now() + delay;
+        if (until - this.pausedUntil >= this.pause) this.onThrottle(new URL(url).hostname, status, until - this.now());   // reported when the pause is new or extended by a pause; an answer inside one already reported is silent
+        this.pausedUntil = Math.max(this.pausedUntil, until);   // waited out at the top of the next try
       } else {
         if (faults >= RETRIES) throw last;
         await this.sleep(this.backoff(faults++));
