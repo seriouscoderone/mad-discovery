@@ -23,7 +23,7 @@ export type SourceDocument = {
 // names look alike. The joiners U+200C and U+200D stay: emoji sequences and Persian need them.
 const FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]|[\u{e0000}-\u{e007f}]/u;
 
-function hasForbiddenCharacters(s: string): boolean {
+export function hasForbiddenCharacters(s: string): boolean {
   return FORBIDDEN.test(s);
 }
 

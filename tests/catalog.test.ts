@@ -240,3 +240,9 @@ test("the tool's commit comes from the checkout, or is null", () => {
   assert.equal(toolCommit(pathToFileURL(mkdtempSync(join(tmpdir(), "nogit-")) + "/")), null);
   assert.match(toolCommit(new URL("../", import.meta.url))!, /^[0-9a-f]{40}$/, "this checkout");
 });
+
+test("readCandidateFile drops a place string holding a Ruling 13 character, as it drops an ill-formed one; the candidate stays", () => {
+  const c1 = String.fromCharCode(0x85), rlo = String.fromCharCode(0x202e);
+  const f = readCandidateFile(JSON.stringify({ finder: "robots", snapshot: "s", candidates: [{ address: "https://a.example/source.json", place: { robots: `http://a.example/${c1}`, file: `x${rlo}y`, offset: 3 } }] }));
+  assert.deepEqual(f?.candidates, [{ address: "https://a.example/source.json", place: { offset: 3 } }]);
+});

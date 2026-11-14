@@ -5,15 +5,15 @@ import { isSaid } from "./said.ts";
 import { parseSourceAddress } from "./address.ts";
 import { levels, type Candidate } from "./crawl.ts";
 import { visitAll } from "./visit.ts";
-import { byKey, isRecord, type Publication } from "./source.ts";
+import { byKey, hasForbiddenCharacters, isRecord, type Publication } from "./source.ts";
+import type { CandidateFile } from "./finders/candidates.ts";
 import { asciiJson } from "./json.ts";
 import { PATH_LIMITS, PUBLICATION, type RowLimits, type ContainedLimits } from "./limits.ts";
 import { catalogPages, SEEDED_NOTE, type SourcePages } from "./catalogpages.ts";
 import type { Session } from "./session.ts";
 import type { Robots } from "./robots.ts";
 
-/** What a finder writes (docs/design.md "What a finder returns"); place is the finder's own record of where it saw the line. */
-export type CandidateFile = { finder: string; snapshot: string; candidates: { address: string; place: Record<string, string | number> }[] };
+export type { CandidateFile };
 
 export type Found =
   | { by: "from" }
@@ -52,7 +52,7 @@ export function readCandidateFile(text: string): CandidateFile | null {
   for (const c of raw["candidates"]) {
     if (!isRecord(c) || typeof c["address"] !== "string" || (c["place"] !== undefined && !isRecord(c["place"]))) return null;
     const place: Record<string, string | number> = {};   // keys sorted: the same place written in another order is the same found entry
-    if (isRecord(c["place"])) for (const [k, v] of Object.entries(c["place"]).sort(([p], [q]) => compare(p, q))) if (PLACE_KEY.test(k) && ((typeof v === "string" && v.isWellFormed()) || typeof v === "number")) place[k] = v;   // Ruling 12: an ill-formed string is dropped
+    if (isRecord(c["place"])) for (const [k, v] of Object.entries(c["place"]).sort(([p], [q]) => compare(p, q))) if (PLACE_KEY.test(k) && ((typeof v === "string" && v.isWellFormed() && !hasForbiddenCharacters(v)) || typeof v === "number")) place[k] = v;   // Rulings 12 and 13: an ill-formed string, or one holding a control or format character, is dropped
     candidates.push({ address: c["address"], place });
   }
   return { finder: raw["finder"], snapshot: raw["snapshot"], candidates };
