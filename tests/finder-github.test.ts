@@ -57,7 +57,7 @@ test("pages until a short page, pausing between pages; an incomplete answer or m
   } finally { origin.behave = null; }
 });
 
-test("a repository name outside GitHub's charset, or not well-formed, is skipped; a search that fails after retries writes nothing; a snapshot that is not a date is refused", async () => {
+test("a repository name outside GitHub's charset (a lone surrogate included) is skipped; a search that fails after retries writes nothing; a snapshot that is not a date is refused", async () => {
   const lone = String.fromCharCode(0xd83d);
   origin.behave = (req, res) => {
     if (req.url?.startsWith("/github/search/repositories")) { res.setHeader("content-type", "application/json"); res.end(page([{ full_name: "ok/name", homepage: "https://ok.example/source.json" }, { full_name: "bad name/with space", homepage: "https://bad.example/source.json" }, { full_name: `x/${lone}`, homepage: "https://lone.example/source.json" }, { full_name: "a".repeat(101) + "/b", homepage: "https://long.example/source.json" }])); return true; }
@@ -87,7 +87,7 @@ test("page 1 must carry a total count that is a non-negative integer", async () 
   } finally { origin.behave = null; }
 });
 
-test("ten full pages are accepted only when the total count is exactly 1,000; any other count over ten full pages fails", async () => {
+test("ten full pages are accepted only when the total count is exactly 1,000; ten full pages under any other count fail", async () => {
   try {
     serve((p) => page(full((Number(p) - 1) * 100), 1000));
     slept.length = 0;
@@ -95,15 +95,16 @@ test("ten full pages are accepted only when the total count is exactly 1,000; an
     assert.equal(r.candidates.length, 1000); assert.equal(r.summary["pages"], 10);
     assert.deepEqual(slept, Array(9).fill(PAUSE_MS), "nine pauses");
     serve((p) => page(full((Number(p) - 1) * 100), 999));
-    await assert.rejects(githubFinder(input(), "2026-11-12"), /ten full pages/);
+    await assert.rejects(githubFinder(input(), "2026-11-12"), /counts 999 repositories and returned 1000 items/);
   } finally { origin.behave = null; }
 });
 
-test("an item that is not an object is skipped, a full_name that is not a string is skipped, a page that is not an object fails", async () => {
+test("an item that is not an object, or whose full_name is not a string, names no repository: the run fails; a page that is not an object fails", async () => {
   try {
-    serve(() => page([7, null, "x", { full_name: 5, homepage: "https://n.example/source.json" }, item(1)]));
-    const r = await githubFinder(input(), "2026-11-12");
-    assert.deepEqual(r.candidates.map((c) => c.place["repository"]), ["u/r1"]); assert.equal(r.summary["skipped"], 4);
+    for (const odd of [7, null, "x", { full_name: 5, homepage: "https://n.example/source.json" }]) {
+      serve(() => page([odd, item(1)]));
+      await assert.rejects(githubFinder(input(), "2026-11-12"), /returned 2 items, 1 distinct/, JSON.stringify(odd));
+    }
     serve(() => "[]");
     await assert.rejects(githubFinder(input(), "2026-11-12"), /items/);
   } finally { origin.behave = null; }
@@ -114,5 +115,16 @@ test("a homepage over 512 characters is skipped", async () => {
     serve(() => page([{ full_name: "u/long", homepage: `https://long.example/${"a".repeat(600)}/source.json` }, item(2)]));
     const r = await githubFinder(input(), "2026-11-12");
     assert.deepEqual(r.candidates.map((c) => c.place["repository"]), ["u/r2"]); assert.equal(r.summary["skipped"], 1);
+  } finally { origin.behave = null; }
+});
+
+test("all or nothing across pages: a short page below the total, a page repeating items, or a page whose total differs fails the run", async () => {
+  try {
+    serve((p) => (p === "1" ? page(full(0), 150) : page(full(100).slice(0, 20), 150)));
+    await assert.rejects(githubFinder(input(), "2026-11-12"), /150/, "120 items read for a total of 150");
+    serve((p) => (p === "1" ? page(full(0), 120) : page(full(0).slice(0, 20), 120)));
+    await assert.rejects(githubFinder(input(), "2026-11-12"), /distinct/, "120 items, 100 distinct");
+    serve((p) => (p === "1" ? page(full(0), 150) : page(full(100).slice(0, 50), 151)));
+    await assert.rejects(githubFinder(input(), "2026-11-12"), /the search changed while it was read/);
   } finally { origin.behave = null; }
 });

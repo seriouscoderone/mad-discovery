@@ -13,13 +13,14 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * The GitHub-topic finder (Ruling 10): public repositories carrying the topic mad-source whose homepage is a source address, read through
  * GitHub's repository search. One company's index with no snapshot: the file is named by the UTC date it ran (the caller supplies it), and
- * a build copies the file into its output so another party can compare. All or nothing: an incomplete answer, or more results than GitHub
- * returns, fails the run.
+ * a build copies the file into its output so another party can compare. All or nothing: an incomplete answer, more results than GitHub
+ * returns, a total that changes between pages, or items that are not total_count distinct repositories fails the run.
  */
 export async function githubFinder(input: Input, today: string, opts: { test?: boolean } = {}): Promise<FinderResult> {
   if (!DATE.test(today)) throw new Error(`not a date snapshot name: ${today}`);
   const candidates: FinderCandidate[] = [];
   const summary = { pages: 0, items: 0, candidates: 0, skipped: 0, total: 0 };
+  const names = new Set<string>();   // every item's full_name: the answer is whole only when the items are total_count distinct repositories
   for (let page = 1; page <= MAX_PAGES; page++) {
     if (page > 1) await input.sleep(PAUSE_MS);
     const url = `${input.bases.github}search/repositories?q=${encodeURIComponent(`topic:${TOPIC}`)}&per_page=${PAGE}&page=${page}`;
@@ -30,29 +31,28 @@ export async function githubFinder(input: Input, today: string, opts: { test?: b
     const items = answer["items"];
     if (!Array.isArray(items)) throw new Error(`page ${page} has no items list`);
     if (answer["incomplete_results"] === true) throw new Error(`page ${page} is incomplete: GitHub answered before the search finished`);
+    const total = answer["total_count"];
     if (page === 1) {
-      const total = answer["total_count"];
       if (typeof total !== "number" || !Number.isInteger(total) || total < 0) throw new Error("page 1 has no total_count");
       summary.total = total;
       if (summary.total > MAX_PAGES * PAGE) throw new Error(`the search holds ${summary.total} repositories, more than the ${MAX_PAGES * PAGE} GitHub returns`);
-    }
+    } else if (total !== summary.total) throw new Error(`page ${page}: the search changed while it was read`);
     summary.pages++;
     for (const item of items) {
-      summary.items++;
+      summary.items++;   // read, whether or not it gives a candidate
       const record = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
       const homepage = record["homepage"];
       const name = record["full_name"];
+      if (typeof name === "string") names.add(name);
       const parsed = typeof homepage === "string" ? parseSourceAddress(homepage, { test: opts.test }) : null;
-      if (parsed === null || typeof name !== "string" || !REPOSITORY.test(name) || !name.isWellFormed()) {
-        // isWellFormed is unreachable after REPOSITORY (ASCII only); kept as Ruling 12 belt-and-braces
-        summary.skipped++; continue;
-      }
+      if (parsed === null || typeof name !== "string" || !REPOSITORY.test(name)) { summary.skipped++; continue; }
       candidates.push({ address: parsed.address, place: { repository: name } });
       summary.candidates++;
     }
-    if (items.length < PAGE) break;
-    // Ten full pages are the whole answer only when the stated total is exactly what ten pages hold; otherwise GitHub holds more than it returned.
-    if (page === MAX_PAGES && summary.total !== MAX_PAGES * PAGE) throw new Error("the search returned ten full pages: more than GitHub returns for one search");
+    if (items.length < PAGE || summary.items >= summary.total) break;
+  }
+  if (summary.items !== summary.total || names.size !== summary.total) {
+    throw new Error(`the search counts ${summary.total} repositories and returned ${summary.items} items, ${names.size} distinct`);
   }
   return { finder: "github", snapshot: today, candidates, summary };
 }
