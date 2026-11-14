@@ -1,6 +1,5 @@
 import http from "node:http";
 import https from "node:https";
-import type { IncomingHttpHeaders } from "node:http";
 import type { Readable } from "node:stream";
 import { USER_AGENT, resolveNames, type Resolve } from "../fetch.ts";
 import { isLoopback, isPublic, parseIPv4 } from "../ip.ts";
@@ -12,9 +11,7 @@ export const PUBLIC_INPUTS: InputBases = { archive: "https://data.commoncrawl.or
 export type InputOptions = {
   test?: boolean;                        // admits plain-HTTP loopback bases and loopback answers; set by test code only
   connections?: number;                  // sockets to one host at a time; 16 by default (docs/design.md, Fetching safely)
-  retries?: number;                      // after a 429, a rate-limited 403, a 5xx, a connection error or an idle connection; 8 by default
-  pause?: number;                        // the first pause in ms, doubling; 1000 by default
-  maxPause?: number;                     // no doubled pause is longer; 60 s by default
+  pause?: number;                        // the first pause in ms, doubling up to MAX_PAUSE; 1000 by default
   idleMs?: number;                       // no bytes for this long is a connection error; 60 s by default
   sleep?: (ms: number) => Promise<void>; // tests inject one
   now?: () => number;                    // tests inject a clock
@@ -24,18 +21,18 @@ export type InputOptions = {
 export type InputReason = "refused-url" | "refused-address" | "status" | "redirected" | "encoded" | "too-large" | "unreachable";
 
 export class InputError extends Error {
-  readonly url: string;
   readonly reason: InputReason;
   readonly status: number | undefined;
   constructor(url: string, reason: InputReason, status?: number) {
     super(`${reason}${status !== undefined ? ` ${status}` : ""}: ${url}`);
-    this.url = url;
     this.reason = reason;
     this.status = status;
   }
 }
 
 export const RETRY_AFTER_MAX = 120_000;   // a host's Retry-After, honoured up to two minutes
+export const RETRIES = 8;                 // after a 429, a rate-limited 403, a 5xx, a connection error, an idle connection, or a body that broke off
+const MAX_PAUSE = 60_000;                 // no doubled pause is longer
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const LOOPBACK_BASE = /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?\//;
 
@@ -43,8 +40,8 @@ const LOOPBACK_BASE = /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?\//;
  * One streaming GET of a fixed public input (docs/design.md "What a finder returns": a finder's reads of its own public input are
  * outside the limits that bound fetches of strangers' addresses). It keeps every other guarantee of fetchJson: a name resolved once
  * to public addresses and the socket connected to the address checked, TLS verified, no redirect, no content encoding. It gives up an
- * idle connection, retries a 429, a rate-limited 403, a 5xx or a connection error no faster than once a second, honours Retry-After,
- * makes every request wait out a host's slow-down, and holds at most `connections` sockets to a host.
+ * idle connection, retries a 429, a rate-limited 403, a 5xx, a connection error or (readAll) a body that broke off, no faster than once
+ * a second, honours Retry-After, makes every request wait out a host's slow-down, and holds at most `connections` sockets to a host.
  */
 export class Input {
   readonly bases: InputBases;
@@ -52,9 +49,7 @@ export class Input {
   private readonly now: () => number;
   private readonly resolve: Resolve;
   private readonly test: boolean;
-  private readonly retries: number;
   private readonly pause: number;
-  private readonly maxPause: number;
   private readonly idleMs: number;
   private readonly httpsAgent: https.Agent;
   private readonly httpAgent: http.Agent;
@@ -67,9 +62,7 @@ export class Input {
     this.now = opts.now ?? Date.now;
     this.resolve = opts.resolve ?? resolveNames;
     this.test = opts.test === true;
-    this.retries = opts.retries ?? 8;
     this.pause = opts.pause ?? 1000;
-    this.maxPause = opts.maxPause ?? 60_000;
     this.idleMs = opts.idleMs ?? 60_000;
     const max = opts.connections ?? 16;
     this.httpsAgent = new https.Agent({ keepAlive: true, maxSockets: max });
@@ -115,7 +108,7 @@ export class Input {
         agent: secure ? this.httpsAgent : this.httpAgent,
         ...(lookup !== undefined ? { lookup } : {}),
         rejectUnauthorized: true,
-        headers: { "accept-encoding": "identity", "user-agent": USER_AGENT, ...headers },
+        headers: { ...headers, "accept-encoding": "identity", "user-agent": USER_AGENT },
       }, (res) => {
         res.setTimeout(this.idleMs, () => res.destroy(new InputError(url, "unreachable")));   // no bytes for idleMs: give the connection up
         resolve(res);
@@ -146,8 +139,13 @@ export class Input {
     return Math.min(Number(v) * 1000, RETRY_AFTER_MAX);
   }
 
+  /** The pause before try attempt + 1: the first pause, doubled each time, never longer than a minute. */
+  backoff(attempt: number): number {
+    return Math.min(this.pause * 2 ** attempt, MAX_PAUSE);
+  }
+
   /** A 200 answer's stream, or an InputError. */
-  async open(url: string, headers: Record<string, string> = {}): Promise<{ status: 200; stream: Readable; headers: IncomingHttpHeaders }> {
+  async open(url: string, headers: Record<string, string> = {}): Promise<Readable> {
     if (!this.admitted(url)) throw new InputError(url, "refused-url");
     let last: InputError = new InputError(url, "unreachable");
     for (let attempt = 0; ; attempt++) {
@@ -168,7 +166,7 @@ export class Input {
         if (status === 200) {
           const encoding = res.headers["content-encoding"];
           if (encoding !== undefined && encoding.toLowerCase() !== "identity") { res.destroy(); throw new InputError(url, "encoded", 200); }
-          return { status, stream: res, headers: res.headers };
+          return res;
         }
         res.resume();
         if (status >= 300 && status < 400) throw new InputError(url, "redirected", status);
@@ -177,30 +175,32 @@ export class Input {
         throttled = Input.throttled(res);
         after = throttled ? Input.retryAfter(res.headers["retry-after"]) : null;
       }
-      if (attempt >= this.retries) throw last;
-      const doubling = Math.min(this.pause * 2 ** attempt, this.maxPause);
-      const delay = after === null ? doubling : Math.max(after, this.pause);   // Retry-After never brings a retry under the one-pause floor
+      if (attempt >= RETRIES) throw last;
+      const delay = after === null ? this.backoff(attempt) : Math.max(after, this.pause);   // Retry-After never brings a retry under the one-pause floor
       if (throttled) this.pausedUntil = Math.max(this.pausedUntil, this.now() + delay);   // waited out at the top of the next try
       else await this.sleep(delay);
     }
   }
 
-  /** The whole body of a small input, bounded. */
+  /** The whole body of a small input, bounded; read again from the start, after the backoff, when the body breaks off or stalls. */
   async readAll(url: string, maxBytes: number, headers: Record<string, string> = {}): Promise<Uint8Array> {
-    const { stream } = await this.open(url, headers);
-    const chunks: Buffer[] = [];
-    let read = 0;
-    try {
-      for await (const chunk of stream) {
-        read += (chunk as Buffer).length;
-        if (read > maxBytes) { stream.destroy(); throw new InputError(url, "too-large"); }
-        chunks.push(chunk as Buffer);
+    for (let attempt = 0; ; attempt++) {
+      const stream = await this.open(url, headers);   // a failure here has had open's own retries
+      const chunks: Buffer[] = [];
+      let read = 0;
+      try {
+        for await (const chunk of stream) {
+          read += (chunk as Buffer).length;
+          if (read > maxBytes) { stream.destroy(); throw new InputError(url, "too-large"); }
+          chunks.push(chunk as Buffer);
+        }
+        return new Uint8Array(Buffer.concat(chunks));
+      } catch (e) {
+        if (e instanceof InputError && e.reason === "too-large") throw e;
+        if (attempt >= RETRIES) throw new InputError(url, "unreachable");   // the body kept breaking off (an idle timeout, a reset)
       }
-    } catch (e) {
-      if (e instanceof InputError) throw e;
-      throw new InputError(url, "unreachable");   // the stream failed mid-body (an idle timeout, a reset)
+      await this.sleep(this.backoff(attempt));
     }
-    return new Uint8Array(Buffer.concat(chunks));
   }
 
   close(): void {

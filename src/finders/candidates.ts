@@ -15,6 +15,9 @@ export type RobotsRecord = { file: string; candidates: FinderCandidate[]; counts
 /** Where a finder keeps the files it has finished, so a failed or killed run resumes; n is the file's position in the listing. */
 export type Journal = { read(n: number, file: string): RobotsRecord | null; write(n: number, record: RobotsRecord): void };
 
+/** The longest robots.txt URL a place may hold: the address rule's bound. */
+export const MAX_URI = 512;
+
 /** At least one character, every one printable ASCII, no space: what a crawler's URL is, and all a place's URL may be. */
 export function printableAscii(s: string): boolean {
   if (s.length === 0) return false;

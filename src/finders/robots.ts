@@ -1,17 +1,15 @@
 import { createGunzip, gunzipSync } from "node:zlib";
-import { Input, InputError } from "./input.ts";
+import { Input, InputError, RETRIES } from "./input.ts";
 import { warcRecords, robotsLine } from "./warc.ts";
 import { parseSourceAddress } from "../address.ts";
-import { printableAscii, type FinderCandidate, type FinderResult, type Journal, type RobotsCounts, type RobotsRecord } from "./candidates.ts";
+import { MAX_URI, printableAscii, type FinderCandidate, type FinderResult, type Journal, type RobotsCounts, type RobotsRecord } from "./candidates.ts";
 
 export const CRAWL = /^CC-MAIN-\d{4}-\d{2}$/;
 const MAX_PATHS = 16 * 1024 * 1024;           // the compressed path listing; 100,000 lines are about 3 MB
 const MAX_PATHS_INFLATED = 64 * 1024 * 1024;  // and about 10 MB inflated
 const MAX_INFO = 1024 * 1024;
-const MAX_URI = 512;
 const PATH_CHARS = /^[A-Za-z0-9._\/-]+$/;     // a fixed pattern, anchored, over one listing line: linear
 const IN_FLIGHT = 16;
-const FILE_RETRIES = 8;                       // a file whose body broke off is read again from the start
 
 export type RobotsHooks = {
   progress?: (done: number, total: number) => void;   // after each file
@@ -38,7 +36,7 @@ class BodyError extends InputError {
 /** One archive file, streamed through gunzip and the record parser. */
 async function readFile(input: Input, file: string, test: boolean): Promise<RobotsRecord> {
   const url = `${input.bases.archive}${file}`;
-  const { stream } = await input.open(url);   // a failure here has had the input's own retries
+  const stream = await input.open(url);   // a failure here has had the input's own retries
   const gunzip = createGunzip();
   stream.on("error", () => gunzip.destroy(new BodyError(url)));
   const candidates: FinderCandidate[] = [];
@@ -71,8 +69,8 @@ async function readFile(input: Input, file: string, test: boolean): Promise<Robo
 async function readFileRetried(input: Input, file: string, test: boolean, stop: () => boolean): Promise<RobotsRecord> {
   for (let attempt = 0; ; attempt++) {
     try { return await readFile(input, file, test); } catch (e) {
-      if (!(e instanceof BodyError) || attempt >= FILE_RETRIES || stop()) throw e;
-      await input.sleep(Math.min(1000 * 2 ** attempt, 60_000));
+      if (!(e instanceof BodyError) || attempt >= RETRIES || stop()) throw e;
+      await input.sleep(input.backoff(attempt));
       if (stop()) throw e;
     }
   }

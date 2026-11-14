@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { asciiJson } from "../json.ts";
 import { isRecord } from "../source.ts";
 import { parseSourceAddress } from "../address.ts";
-import { printableAscii, type FinderCandidate, type Journal, type RobotsCounts, type RobotsRecord } from "./candidates.ts";
+import { MAX_URI, printableAscii, type FinderCandidate, type Journal, type RobotsCounts, type RobotsRecord } from "./candidates.ts";
 
 const COUNTS: (keyof RobotsCounts)[] = ["records", "responses", "lines", "candidates", "notAddresses", "skipped"];
 
@@ -57,7 +57,7 @@ function entry(raw: unknown, file: string, test: boolean): RobotsRecord | null {
   for (const c of raw["candidates"]) {
     if (!isRecord(c) || typeof c["address"] !== "string" || parseSourceAddress(c["address"], { test })?.address !== c["address"] || !isRecord(c["place"])) return null;
     const p = c["place"];
-    if (p["file"] !== file || typeof p["offset"] !== "number" || !Number.isInteger(p["offset"]) || p["offset"] < 0 || typeof p["robots"] !== "string" || p["robots"].length > 512 || !printableAscii(p["robots"])) return null;
+    if (p["file"] !== file || typeof p["offset"] !== "number" || !Number.isInteger(p["offset"]) || p["offset"] < 0 || typeof p["robots"] !== "string" || p["robots"].length > MAX_URI || !printableAscii(p["robots"])) return null;
     candidates.push({ address: c["address"], place: { file, offset: p["offset"], robots: p["robots"] } });
   }
   if (candidates.length !== counts.candidates) return null;

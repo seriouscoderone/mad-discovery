@@ -38,13 +38,15 @@ test("open streams a 200 as served, with identity encoding and the tool's user a
   };
   try {
     const i = input();
-    const r = await i.open(`${origin.origin}/archive/a.bin`, { accept: "application/octet-stream" });
-    assert.equal(r.status, 200);
-    const chunks: Buffer[] = []; for await (const c of r.stream) chunks.push(c as Buffer);
+    const stream = await i.open(`${origin.origin}/archive/a.bin`, { accept: "application/octet-stream" });
+    const chunks: Buffer[] = []; for await (const c of stream) chunks.push(c as Buffer);
     assert.deepEqual(new Uint8Array(Buffer.concat(chunks)), new Uint8Array([1, 2, 3, 4, 5]));
     assert.equal(seen["accept-encoding"], "identity");
     assert.equal(seen["accept"], "application/octet-stream");
     assert.match(String(seen["user-agent"]), /^mad-discovery /);
+    (await i.open(`${origin.origin}/archive/a.bin`, { "accept-encoding": "gzip", "user-agent": "someone-else" })).resume();
+    assert.equal(seen["accept-encoding"], "identity", "a caller cannot ask for an encoding");
+    assert.match(String(seen["user-agent"]), /^mad-discovery /, "nor change the tool's name");
     assert.deepEqual(new Uint8Array(await i.readAll(`${origin.origin}/archive/a.bin`, 5)), new Uint8Array([1, 2, 3, 4, 5]));
     await assert.rejects(i.readAll(`${origin.origin}/archive/a.bin`, 4), reason("too-large"));
     await assert.rejects(i.open(`${origin.origin}/archive/zipped`), reason("encoded"));
@@ -84,9 +86,8 @@ test("a redirect is not followed; a 404 fails at once; a 503, a 429 or a rate-li
     await assert.rejects(i.open(`${origin.origin}/archive/limited`), reason("status", 403));
     assert.equal(slept.length, 8, "a 403 with x-ratelimit-remaining 0 is GitHub's rate limit: retried like a 429");
     calls = 0; slept.length = 0;
-    const r = await i.open(`${origin.origin}/archive/flaky`);
-    assert.equal(r.status, 200); assert.deepEqual(slept, [1000, 2000], "recovered on the third try");
-    r.stream.resume();
+    (await i.open(`${origin.origin}/archive/flaky`)).resume();
+    assert.deepEqual(slept, [1000, 2000], "recovered on the third try");
     const dead = await Origin.start(); const deadBases = { ...bases, archive: `${dead.origin}/archive/` }; await dead.close();
     slept.length = 0;
     await assert.rejects(new Input(deadBases, { test: true, sleep, now }).open(`${deadBases.archive}x`), reason("unreachable"));

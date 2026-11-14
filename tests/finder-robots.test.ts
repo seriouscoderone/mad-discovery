@@ -150,14 +150,32 @@ test("a file whose body breaks off is read again from the start; the snapshot fa
   origin.behave = breakOff(1);
   try {
     const before = warcRequests().filter((p) => p.endsWith("/f3.warc.gz")).length;
-    const r = await find();
+    const slept: number[] = [];
+    const r = await find(new Input(bases, { test: true, pause: 7, sleep: async (ms) => { slept.push(ms); } }));
     assert.equal(r.candidates.length, 20);
     assert.equal(warcRequests().filter((p) => p.endsWith("/f3.warc.gz")).length - before, 2, "read twice: broken, then whole");
+    assert.deepEqual(slept, [7], "the input's backoff, from its pause option");
   } finally { origin.behave = null; }
   cut = 0;
   origin.behave = breakOff(100);
   try {
     await assert.rejects(find(), (e: unknown) => (e as { reason?: string }).reason === "unreachable");
+  } finally { origin.behave = null; }
+});
+
+test("a listing whose connection drops mid-body is read again from the start", async () => {
+  many(2);
+  const listing = paths(["f0.warc.gz", "f1.warc.gz"]);
+  let cut = 0;
+  origin.behave = (req, res) => {
+    if (req.url?.endsWith("/robotstxt.paths.gz") && cut++ === 0) { res.writeHead(200); res.write(Buffer.from(listing.subarray(0, Math.floor(listing.length / 2)))); setTimeout(() => res.destroy(), 10); return true; }
+    return false;
+  };
+  try {
+    const before = origin.requests.filter((p) => p.endsWith("/robotstxt.paths.gz")).length;
+    const r = await find();
+    assert.equal(r.candidates.length, 2);
+    assert.equal(origin.requests.filter((p) => p.endsWith("/robotstxt.paths.gz")).length - before, 2, "read twice: broken, then whole");
   } finally { origin.behave = null; }
 });
 
