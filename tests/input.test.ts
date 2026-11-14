@@ -57,16 +57,18 @@ test("open streams a 200 as served, with identity encoding and the tool's user a
   } finally { origin.behave = null; }
 });
 
-test("a redirect is not followed; a 404 fails at once; a 503, a 429 or a rate-limited 403 is retried eight times, after 1, 2, 4, 8, 16, 32, 60, 60 seconds, and then fails; a connection error likewise; an idle connection is given up", async () => {
+const THROTTLED = [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000, 60000, 60000, 60000, 60000, 60000, 60000];   // 603 s: about ten minutes
+const FAULTED = [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000];
+
+test("a redirect is not followed; a 404 fails at once; a plain 403 from GitHub fails at once; a 500, a 502 or a connection error is retried eight times, after 1, 2, 4, 8, 16, 32, 60, 60 seconds, and then fails; an idle connection is given up", async () => {
   let calls = 0;
   origin.behave = (req, res) => {
     calls++;
     if (req.url === "/archive/moved") { res.statusCode = 302; res.setHeader("location", `${origin.origin}/archive/a.bin`); res.end(); return true; }
-    if (req.url === "/archive/busy") { res.statusCode = 503; res.end(); return true; }
-    if (req.url === "/archive/slow") { res.statusCode = 429; res.end(); return true; }
-    if (req.url === "/archive/limited") { res.statusCode = 403; res.setHeader("x-ratelimit-remaining", "0"); res.end(); return true; }
-    if (req.url === "/archive/forbidden") { res.statusCode = 403; res.end(); return true; }
-    if (req.url === "/archive/flaky") { res.statusCode = calls <= 2 ? 503 : 200; res.end(calls > 2 ? "ok" : undefined); return true; }
+    if (req.url === "/archive/broken") { res.statusCode = 500; res.end(); return true; }
+    if (req.url === "/archive/gateway") { res.statusCode = 502; res.end(); return true; }
+    if (req.url === "/github/forbidden") { res.statusCode = 403; res.end(); return true; }
+    if (req.url === "/archive/flaky") { res.statusCode = calls <= 2 ? 500 : 200; res.end(calls > 2 ? "ok" : undefined); return true; }
     if (req.url === "/archive/stalled") { res.writeHead(200); res.flushHeaders(); return true; }   // headers, then nothing
     return false;
   };
@@ -76,29 +78,91 @@ test("a redirect is not followed; a 404 fails at once; a 503, a 429 or a rate-li
     await assert.rejects(i.open(`${origin.origin}/archive/moved`), reason("redirected"));
     assert.deepEqual(origin.requests.slice(before), ["archive/moved"], "the redirect's target was not requested");
     await assert.rejects(i.open(`${origin.origin}/archive/missing`), reason("status", 404));
-    await assert.rejects(i.open(`${origin.origin}/archive/forbidden`), reason("status", 403));
-    assert.equal(origin.requests.filter((p) => p === "archive/forbidden").length, 1, "a plain 403 is not retried");
     slept.length = 0;
-    await assert.rejects(i.open(`${origin.origin}/archive/busy`), reason("status", 503));
-    assert.deepEqual(slept, [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000], "eight retries, doubling from one second, at most a minute");
-    assert.equal(origin.requests.filter((p) => p === "archive/busy").length, 9);
+    await assert.rejects(i.open(`${origin.origin}/github/forbidden`), reason("status", 403));
+    assert.equal(origin.requests.filter((p) => p === "github/forbidden").length, 1, "a 403 from GitHub without its rate-limit headers is not retried");
+    assert.deepEqual(slept, []);
     slept.length = 0;
-    await assert.rejects(i.open(`${origin.origin}/archive/slow`), reason("status", 429));
-    assert.equal(slept.length, 8);
+    await assert.rejects(i.open(`${origin.origin}/archive/broken`), reason("status", 500));
+    assert.deepEqual(slept, FAULTED, "eight retries, doubling from one second, at most a minute");
+    assert.equal(origin.requests.filter((p) => p === "archive/broken").length, 9);
     slept.length = 0;
-    await assert.rejects(i.open(`${origin.origin}/archive/limited`), reason("status", 403));
-    assert.equal(slept.length, 8, "a 403 with x-ratelimit-remaining 0 is GitHub's rate limit: retried like a 429");
+    await assert.rejects(i.open(`${origin.origin}/archive/gateway`), reason("status", 502));
+    assert.equal(origin.requests.filter((p) => p === "archive/gateway").length, 9, "a 502 likewise");
     calls = 0; slept.length = 0;
     (await i.open(`${origin.origin}/archive/flaky`)).resume();
     assert.deepEqual(slept, [1000, 2000], "recovered on the third try");
     const dead = await Origin.start(); const deadBases = { ...bases, archive: `${dead.origin}/archive/` }; await dead.close();
     slept.length = 0;
     await assert.rejects(new Input(deadBases, { test: true, sleep, now }).open(`${deadBases.archive}x`), reason("unreachable"));
-    assert.equal(slept.length, 8);
+    assert.deepEqual(slept, FAULTED, "a connection error: eight retries");
     slept.length = 0;
     const quick = input({ idleMs: 50 });
     await assert.rejects(quick.readAll(`${origin.origin}/archive/stalled`, 100), reason("unreachable"), "no bytes for idleMs: the connection is given up");
     quick.close(); i.close();
+  } finally { origin.behave = null; }
+});
+
+test("a host saying slow down (a 503, a 429, GitHub's rate-limited 403, any 403 from Common Crawl) is retried fifteen times, about ten minutes, and then fails", async () => {
+  origin.behave = (req, res) => {
+    if (req.url === "/archive/busy") { res.statusCode = 503; res.end(); return true; }
+    if (req.url === "/archive/slow") { res.statusCode = 429; res.end(); return true; }
+    if (req.url === "/github/limited") { res.statusCode = 403; res.setHeader("x-ratelimit-remaining", "0"); res.end(); return true; }
+    if (req.url === "/archive/waf") { res.statusCode = 403; res.end(); return true; }
+    if (req.url === "/index/waf") { res.statusCode = 403; res.end(); return true; }
+    return false;
+  };
+  try {
+    const i = input();
+    for (const [path, status] of [["archive/busy", 503], ["archive/slow", 429], ["github/limited", 403], ["archive/waf", 403], ["index/waf", 403]] as const) {
+      slept.length = 0;
+      await assert.rejects(i.open(`${origin.origin}/${path}`), reason("status", status), path);
+      assert.deepEqual(slept, THROTTLED, `${path}: fifteen retries, doubling from one second, at most a minute`);
+      assert.equal(origin.requests.filter((p) => p === path).length, 16, path);
+    }
+    i.close();
+  } finally { origin.behave = null; }
+});
+
+test("a 403 from Common Crawl is its rate limit: it pauses every request of the input, and the request recovers when the host answers 200", async () => {
+  let n = 0;
+  origin.behave = (req, res) => {
+    if (req.url === "/archive/blocked" && n++ < 3) { res.statusCode = 403; res.end(); return true; }
+    if (req.url === "/archive/blocked") { res.end("ok"); return true; }
+    if (req.url === "/archive/other") { res.end("ok"); return true; }
+    return false;
+  };
+  try {
+    let t = 0; const waits: number[] = [];
+    const j = new Input(bases, { test: true, now: () => t, sleep: async (ms) => { waits.push(ms); t += ms; } });
+    assert.equal(Buffer.from(await j.readAll(`${origin.origin}/archive/blocked`, 10)).toString(), "ok");
+    assert.deepEqual(waits, [1000, 2000, 4000], "the shared pause, doubling");
+    t -= 3000;   // back inside the last pause: another request waits out what is left of it
+    await j.readAll(`${origin.origin}/archive/other`, 10);
+    assert.equal(waits.at(-1), 3000, "another request waits out the same pause");
+    j.close();
+  } finally { origin.behave = null; }
+});
+
+test("onThrottle is told the host, the status and the pause each time a host says slow down, and never for a fault", async () => {
+  const n: Record<string, number> = {};
+  origin.behave = (req, res) => {
+    const u = req.url ?? ""; const k = n[u] = (n[u] ?? 0) + 1;
+    if (u === "/archive/twice" && k <= 2) { res.statusCode = k === 1 ? 403 : 429; if (k === 2) res.setHeader("retry-after", "7"); res.end(); return true; }
+    if (u === "/archive/broken-once" && k === 1) { res.statusCode = 500; res.end(); return true; }
+    if (req.url?.startsWith("/archive/")) { res.end("ok"); return true; }
+    return false;
+  };
+  try {
+    const told: [string, number, number][] = [];
+    const j = input({ onThrottle: (host: string, status: number, ms: number) => { told.push([host, status, ms]); } });
+    await j.readAll(`${origin.origin}/archive/twice`, 10);
+    const host = new URL(origin.origin).hostname;
+    assert.deepEqual(told, [[host, 403, 1000], [host, 429, 7000]]);
+    await j.readAll(`${origin.origin}/archive/broken-once`, 10);
+    assert.equal(n["/archive/broken-once"], 2, "the 500 was retried");
+    assert.equal(told.length, 2, "a 500 is a fault, not a slow-down");
+    j.close();
   } finally { origin.behave = null; }
 });
 

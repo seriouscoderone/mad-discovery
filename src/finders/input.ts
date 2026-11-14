@@ -16,6 +16,7 @@ export type InputOptions = {
   sleep?: (ms: number) => Promise<void>; // tests inject one
   now?: () => number;                    // tests inject a clock
   resolve?: Resolve;                     // tests inject answers; resolveNames otherwise
+  onThrottle?: (host: string, status: number, ms: number) => void;   // told each pause a host's slow-down sets: the URL's hostname, never text from the answer
 };
 
 export type InputReason = "refused-url" | "refused-address" | "status" | "redirected" | "encoded" | "too-large" | "unreachable";
@@ -31,7 +32,8 @@ export class InputError extends Error {
 }
 
 export const RETRY_AFTER_MAX = 120_000;   // a host's Retry-After, honoured up to two minutes
-export const RETRIES = 8;                 // after a 429, a rate-limited 403, a 5xx, a connection error, an idle connection, or a body that broke off
+export const RETRIES = 8;                 // after a 5xx other than a 503, a connection error, an idle connection, or a body that broke off
+export const THROTTLE_RETRIES = 15;       // after a host said slow down (a 429, a 503, a rate-limited 403): 1+2+4+...+32+60*9 = 603 s, about ten minutes
 const MAX_PAUSE = 60_000;                 // no doubled pause is longer
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const LOOPBACK_BASE = /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?\//;
@@ -40,14 +42,16 @@ const LOOPBACK_BASE = /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?\//;
  * One streaming GET of a fixed public input (docs/design.md "What a finder returns": a finder's reads of its own public input are
  * outside the limits that bound fetches of strangers' addresses). It keeps every other guarantee of fetchJson: a name resolved once
  * to public addresses and the socket connected to the address checked, TLS verified, no redirect, no content encoding. It gives up an
- * idle connection, retries a 429, a rate-limited 403, a 5xx, a connection error or (readAll) a body that broke off, no faster than once
- * a second, honours Retry-After, makes every request wait out a host's slow-down, and holds at most `connections` sockets to a host.
+ * idle connection, retries another 5xx, a connection error or (readAll) a body that broke off eight times, no faster than once a second; a
+ * host saying slow down (a 429, a 503, GitHub's rate-limited 403, any 403 from Common Crawl, whose missing file is a 404) fifteen times,
+ * about ten minutes, honouring Retry-After and making every request wait out the pause; and holds at most `connections` sockets to a host.
  */
 export class Input {
   readonly bases: InputBases;
   readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly resolve: Resolve;
+  private readonly onThrottle: (host: string, status: number, ms: number) => void;
   private readonly test: boolean;
   private readonly pause: number;
   private readonly idleMs: number;
@@ -61,6 +65,7 @@ export class Input {
     this.sleep = opts.sleep ?? wait;
     this.now = opts.now ?? Date.now;
     this.resolve = opts.resolve ?? resolveNames;
+    this.onThrottle = opts.onThrottle ?? (() => {});
     this.test = opts.test === true;
     this.pause = opts.pause ?? 1000;
     this.idleMs = opts.idleMs ?? 60_000;
@@ -119,16 +124,19 @@ export class Input {
     });
   }
 
-  /** Whether an answer is to be tried again: a 429, a 403 that is GitHub's rate limit (primary or secondary), any 5xx. */
-  private static retried(res: http.IncomingMessage): boolean {
+  /**
+   * What an answer other than a 200 or a redirect is: the host saying slow down (its pause applies to every request of this input), a
+   * passing fault, or final. A 403 from Common Crawl's hosts is their rate limit, since a missing file there is a 404; a 403 from GitHub
+   * is its rate limit (primary or secondary) only with x-ratelimit-remaining 0 or a Retry-After.
+   */
+  private answer(url: string, res: http.IncomingMessage): "throttled" | "fault" | "final" {
     const status = res.statusCode ?? 0;
-    return status === 429 || status >= 500 || (status === 403 && (res.headers["x-ratelimit-remaining"] === "0" || res.headers["retry-after"] !== undefined));
-  }
-
-  /** The host saying slow down: a 429, a 503, GitHub's rate-limited 403. Its pause applies to every request of this input. */
-  private static throttled(res: http.IncomingMessage): boolean {
-    const status = res.statusCode ?? 0;
-    return status === 429 || status === 503 || status === 403;   // a 403 reaches here only when retried() said it is the rate limit
+    if (status === 429 || status === 503) return "throttled";
+    if (status === 403) {
+      if (url.startsWith(this.bases.archive) || url.startsWith(this.bases.index)) return "throttled";
+      return res.headers["x-ratelimit-remaining"] === "0" || res.headers["retry-after"] !== undefined ? "throttled" : "final";
+    }
+    return status >= 500 ? "fault" : "final";
   }
 
   /** Retry-After in its seconds form, at most two minutes; the date form is ignored and the doubling pause applies. */
@@ -144,11 +152,12 @@ export class Input {
     return Math.min(this.pause * 2 ** attempt, MAX_PAUSE);
   }
 
-  /** A 200 answer's stream, or an InputError. */
+  /** A 200 answer's stream, or an InputError. Slow-downs and faults have separate budgets: THROTTLE_RETRIES and RETRIES retries. */
   async open(url: string, headers: Record<string, string> = {}): Promise<Readable> {
     if (!this.admitted(url)) throw new InputError(url, "refused-url");
     let last: InputError = new InputError(url, "unreachable");
-    for (let attempt = 0; ; attempt++) {
+    let throttles = 0, faults = 0;   // retries so far of each kind
+    for (;;) {
       for (let target = this.pausedUntil; target - this.now() > 0; ) {   // a host said slow down: wait it out, and again if it was extended meanwhile
         await this.sleep(target - this.now());
         if (this.pausedUntil === target) break;
@@ -161,8 +170,9 @@ export class Input {
       }
       let throttled = false;
       let after: number | null = null;
+      let status = 0;
       if (res !== null) {
-        const status = res.statusCode ?? 0;
+        status = res.statusCode ?? 0;
         if (status === 200) {
           const encoding = res.headers["content-encoding"];
           if (encoding !== undefined && encoding.toLowerCase() !== "identity") { res.destroy(); throw new InputError(url, "encoded", 200); }
@@ -171,14 +181,21 @@ export class Input {
         res.resume();
         if (status >= 300 && status < 400) throw new InputError(url, "redirected", status);
         last = new InputError(url, "status", status);
-        if (!Input.retried(res)) throw last;
-        throttled = Input.throttled(res);
+        const kind = this.answer(url, res);
+        if (kind === "final") throw last;
+        throttled = kind === "throttled";
         after = throttled ? Input.retryAfter(res.headers["retry-after"]) : null;
       }
-      if (attempt >= RETRIES) throw last;
-      const delay = after === null ? this.backoff(attempt) : Math.max(after, this.pause);   // Retry-After never brings a retry under the one-pause floor
-      if (throttled) this.pausedUntil = Math.max(this.pausedUntil, this.now() + delay);   // waited out at the top of the next try
-      else await this.sleep(delay);
+      if (throttled) {
+        if (throttles >= THROTTLE_RETRIES) throw last;
+        const delay = after === null ? this.backoff(throttles) : Math.max(after, this.pause);   // Retry-After never brings a retry under the one-pause floor
+        throttles++;
+        this.pausedUntil = Math.max(this.pausedUntil, this.now() + delay);   // waited out at the top of the next try
+        this.onThrottle(new URL(url).hostname, status, delay);
+      } else {
+        if (faults >= RETRIES) throw last;
+        await this.sleep(this.backoff(faults++));
+      }
     }
   }
 

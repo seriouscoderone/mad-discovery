@@ -557,6 +557,27 @@ test("catalog find writes one candidate file per snapshot, keeps files already t
   } finally { cc.behave = null; await cc.close(); }
 });
 
+test("catalog find says on stderr, never stdout, when Common Crawl asks it to slow down, and the snapshot still completes", async () => {
+  const cc = await Origin.start();
+  try {
+    const SNAP = "CC-MAIN-2026-43";
+    const file = `archive/crawl-data/${SNAP}/segments/1.2/robotstxt/a.warc.gz`;
+    cc.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, gzipSync(Buffer.from(`crawl-data/${SNAP}/segments/1.2/robotstxt/a.warc.gz\n`)));
+    cc.put(file, SAMPLE_WARC);
+    let blocked = 0;
+    cc.behave = (req, res) => { if (req.url === `/${file}` && blocked++ === 0) { res.statusCode = 403; res.end(); return true; } return false; };   // the WAF's 403, once
+    const opts = { ...local, finderInputs: { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" } };
+    const out = join(mkdtempSync(join(tmpdir(), "find-")), "c");
+    const c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "robots", "--out", out, "--snapshot", SNAP], c.io, opts), 0);
+    assert.deepEqual(c.json().written, [SNAP]);
+    const host = new URL(cc.origin).hostname;
+    assert.deepEqual(c.err().split("\n").filter((l) => l.includes("slow down")), [`${SNAP}: ${host} asked to slow down (403): pausing 0 s`]);
+    assert.ok(!c.out().includes("slow down"), "never on stdout");
+    assert.equal(cc.requests.filter((p) => p === file).length, 2, "the file was asked again after the pause");
+  } finally { cc.behave = null; await cc.close(); }
+});
+
 test("catalog find treats a directory or a symlink where a candidate file belongs as a failure, not as a kept file", async () => {
   const cc = await Origin.start();
   try {

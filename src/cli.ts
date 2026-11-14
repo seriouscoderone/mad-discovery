@@ -261,7 +261,9 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
   if (finder === "github" && named.length > 0) return usage(io, "the GitHub finder has no snapshots: its file is named by the day it runs.");
   for (const s of named) if (!CRAWL.test(s)) return usage(io, `not a crawl name: ${s.length > 64 ? s.slice(0, 64) : s}`);
   const { archive, index, github } = options.finderInputs ?? PUBLIC_INPUTS;
-  const input = new Input({ archive, index, github }, { test: options.test === true, pause: options.finderInputs?.pause });
+  let label: string = finder;   // the snapshot being read, once there is one
+  const onThrottle = (host: string, status: number, ms: number): void => { io.err(`${label}: ${host} asked to slow down (${status}): pausing ${ms / 1000} s\n`); };
+  const input = new Input({ archive, index, github }, { test: options.test === true, pause: options.finderInputs?.pause, onThrottle });
   try {
     let snapshots = [...new Set(named)];
     if (finder === "github") snapshots = [options.finderInputs?.today ?? new Date().toISOString().slice(0, 10)];
@@ -287,6 +289,7 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
         continue;
       }
       let journal: FolderJournal | null = null;
+      label = snapshot;
       try {
         if (finder === "robots") journal = new FolderJournal(join(folder, `${snapshot}.progress`), { test: options.test });   // kept between runs, like the folder
         let last = 0;
