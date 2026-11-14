@@ -591,7 +591,7 @@ The work is two epics under this one design (decision 1): bpm-5g1 and bpm-7h1.
 
 1. **Stranger, by fixture.** The test above passes: two sources that never link to each other, a WARC fixture in the shape of Common Crawl's robots.txt archive naming both, `catalog find` over it, and a catalog built from its candidate file lists both for the same SAID. Done 2026-11-13 (`tests/stranger.test.ts`).
 2. **Stranger, live.** Two real sources that never link to each other and are named on no command line. Each is found by a finder: its `Mad-Source` line in a robots.txt that Common Crawl captures with status 200, or a public GitHub repository carrying the topic `mad-source` whose homepage is the source address (Ruling 10). A catalog built by the documented command from named inputs lists both for the same SAID. Until this passes the finder is not proven, and the objective is not shown to be met for strangers. This clause waits on a third party's schedule: a new line shows up in a crawl 3 days to 7 weeks after it is added, and a crawl can miss either host, so it can take one or two crawls and hold the epic open.
-3. **Catalog pages.** From a catalog's index page a person reaches each source's page for a SAID by links alone.
+3. **Catalog pages.** From a catalog's index page a person reaches each source's page for a SAID by links alone. Done 2026-11-12 (`tests/catalogpages.test.ts`, step 5).
 
 ## Build order
 
