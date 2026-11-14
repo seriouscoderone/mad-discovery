@@ -22,18 +22,25 @@ export type RobotsHooks = {
 /** The crawls Common Crawl lists, by their own names, newest first (the name sorts by date). */
 export async function listCrawls(input: Input): Promise<string[]> {
   const bytes = await input.readAll(`${input.bases.index}collinfo.json`, MAX_INFO, { accept: "application/json" });
-  const value: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+  let value: unknown;
+  try { value = JSON.parse(Buffer.from(bytes).toString("utf8")); } catch { throw new Error("collinfo.json is not JSON"); }   // Node's message quotes the input
   if (!Array.isArray(value)) throw new Error("collinfo.json is not a list");
   const ids = value.map((v) => (typeof v === "object" && v !== null && typeof (v as { id?: unknown }).id === "string" ? (v as { id: string }).id : "")).filter((id) => CRAWL.test(id));
   if (ids.length === 0) throw new Error("collinfo.json names no crawl");
   return ids.sort().reverse();
 }
 
+/** A file's body broke off or stalled after a 200 answer: the one failure worth reading the whole file again for. */
+class BodyError extends InputError {
+  constructor(url: string) { super(url, "unreachable"); }
+}
+
 /** One archive file, streamed through gunzip and the record parser. */
 async function readFile(input: Input, file: string, test: boolean): Promise<RobotsRecord> {
-  const { stream } = await input.open(`${input.bases.archive}${file}`);
+  const url = `${input.bases.archive}${file}`;
+  const { stream } = await input.open(url);   // a failure here has had the input's own retries
   const gunzip = createGunzip();
-  stream.on("error", (e) => gunzip.destroy(e instanceof InputError ? e : new InputError(`${input.bases.archive}${file}`, "unreachable")));
+  stream.on("error", () => gunzip.destroy(new BodyError(url)));
   const candidates: FinderCandidate[] = [];
   const counts: RobotsCounts = { records: 0, responses: 0, lines: 0, candidates: 0, notAddresses: 0, skipped: 0 };
   try {
@@ -57,14 +64,37 @@ async function readFile(input: Input, file: string, test: boolean): Promise<Robo
   return { file, candidates, counts };
 }
 
-/** One archive file, read again from the start when its body broke off or stalled; a bad file (gunzip, WARC) or a refusal fails at once. */
+/**
+ * One archive file, read again from the start when its body broke off or stalled; a bad file (gunzip, WARC), a refusal, or a request
+ * the input has already retried fails at once, and so does a file another file's failure has stopped, before and after its pause.
+ */
 async function readFileRetried(input: Input, file: string, test: boolean, stop: () => boolean): Promise<RobotsRecord> {
   for (let attempt = 0; ; attempt++) {
     try { return await readFile(input, file, test); } catch (e) {
-      if (!(e instanceof InputError && e.reason === "unreachable") || attempt >= FILE_RETRIES || stop()) throw e;
+      if (!(e instanceof BodyError) || attempt >= FILE_RETRIES || stop()) throw e;
       await input.sleep(Math.min(1000 * 2 ** attempt, 60_000));
+      if (stop()) throw e;
     }
   }
+}
+
+/** The listing's distinct paths in order, each checked; a bad line is named by its line number (blank lines counted) and length only. */
+function listedFiles(listing: string, snapshot: string): string[] {
+  const prefix = `crawl-data/${snapshot}/`;
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (let from = 0, line = 1; from < listing.length; line++) {
+    let end = listing.indexOf("\n", from);
+    if (end < 0) end = listing.length;
+    const f = listing.slice(from, end).trim();
+    from = end + 1;
+    if (f === "") continue;
+    if (!f.startsWith(prefix) || !f.endsWith(".warc.gz") || f.includes("..") || !PATH_CHARS.test(f)) throw new Error(`line ${line} of the path listing is not a path of this crawl (${f.length} characters)`);
+    if (seen.has(f)) continue;   // a path named twice is read once: positions count distinct paths
+    seen.add(f);
+    files.push(f);
+  }
+  return files;
 }
 
 /**
@@ -77,11 +107,7 @@ export async function robotsFinder(snapshot: string, input: Input, opts: { test?
   if (!CRAWL.test(snapshot)) throw new Error(`not a crawl snapshot name: ${snapshot}`);
   const compressed = await input.readAll(`${input.bases.archive}crawl-data/${snapshot}/robotstxt.paths.gz`, MAX_PATHS);
   const listing = gunzipSync(Buffer.from(compressed), { maxOutputLength: MAX_PATHS_INFLATED }).toString("latin1");
-  const files = listing.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-  const prefix = `crawl-data/${snapshot}/`;
-  files.forEach((f, n) => {
-    if (!f.startsWith(prefix) || !f.endsWith(".warc.gz") || f.includes("..") || !PATH_CHARS.test(f)) throw new Error(`line ${n + 1} of the path listing is not a path of this crawl (${f.length} characters)`);
-  });
+  const files = listedFiles(listing, snapshot);
   if (files.length === 0) throw new Error("the path listing names no file");
   hooks.listing?.(files.length);
   const candidates: FinderCandidate[] = [];

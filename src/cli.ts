@@ -12,7 +12,8 @@ import { redirectTarget } from "./read.ts";
 import { readSourceDocument } from "./document.ts";
 import type { Resolve } from "./fetch.ts";
 import { asciiJson } from "./json.ts";
-import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile } from "./catalog.ts";
+import { buildCatalog, readCandidateFile, toolCommit } from "./catalog.ts";
+import type { CandidateFile } from "./finders/candidates.ts";
 import { Robots } from "./robots.ts";
 import { illFormedStrings } from "./scan.ts";
 

@@ -13,8 +13,6 @@ import { catalogPages, SEEDED_NOTE, type SourcePages } from "./catalogpages.ts";
 import type { Session } from "./session.ts";
 import type { Robots } from "./robots.ts";
 
-export type { CandidateFile };
-
 export type Found =
   | { by: "from" }
   | { by: "introduction"; from: string }

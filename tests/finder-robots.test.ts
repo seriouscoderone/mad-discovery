@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,8 +35,8 @@ const many = (count: number) => {
 test("listCrawls reads collinfo.json and gives the crawl ids newest first, whatever order the list has", async () => {
   origin.put("index/collinfo.json", JSON.stringify([{ id: "CC-MAIN-2026-39" }, { id: "CC-MAIN-2026-43", name: "October 2026 Index" }, { id: "weird" }, { id: "CC-MAIN-2026-34" }]));
   assert.deepEqual(await listCrawls(input()), ["CC-MAIN-2026-43", "CC-MAIN-2026-39", "CC-MAIN-2026-34"]);
-  origin.put("index/collinfo.json", "not json");
-  await assert.rejects(listCrawls(input()));
+  origin.put("index/collinfo.json", "stranger text here");
+  await assert.rejects(listCrawls(input()), (e: unknown) => e instanceof Error && e.message === "collinfo.json is not JSON" && !e.message.includes("stranger"));
   origin.put("index/collinfo.json", JSON.stringify([{ id: "nope" }]));
   await assert.rejects(listCrawls(input()), /crawl/);
 });
@@ -74,10 +74,43 @@ test("a robots URL that is not printable ASCII is not written into a place: the 
   origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/odd.warc.gz`, warcGz([
     { uri: `http://odd.example/r${c1}obots.txt`, status: 200, body: "Mad-Source: https://odd.example/source.json\n" },
     { uri: "http://plain.example/robots.txt", status: 200, body: "Mad-Source: https://plain.example/source.json\n" },
+    { uri: `http://long.example/${"a".repeat(512)}`, status: 200, body: "Mad-Source: https://long.example/source.json\n" },
   ]));
   const r = await find();
   assert.deepEqual(r.candidates.map((c) => c.address), ["https://plain.example/source.json"]);
+  assert.equal(r.summary["skipped"], 2, "not printable ASCII, and over 512 characters");
+});
+
+test("a record whose WARC-Target-URI is empty gives no candidate: it is skipped and counted", async () => {
+  const whole = gunzipSync(warcGz([
+    { uri: "http://blank.example/robots.txt", status: 200, body: "Mad-Source: https://blank.example/source.json\n" },
+    { uri: "http://plain.example/robots.txt", status: 200, body: "Mad-Source: https://plain.example/source.json\n" },
+  ])).toString("latin1").replaceAll("WARC-Target-URI: http://blank.example/robots.txt", "WARC-Target-URI:");
+  origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, paths(["blank.warc.gz"]));
+  origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/blank.warc.gz`, gzipSync(Buffer.from(whole, "latin1")));
+  const r = await find();
+  assert.deepEqual(r.candidates.map((c) => c.address), ["https://plain.example/source.json"]);
   assert.equal(r.summary["skipped"], 1);
+});
+
+test("a listing that names one path twice reads it once; positions count distinct paths", async () => {
+  many(3);
+  origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, paths(["f0.warc.gz", "f1.warc.gz", "f0.warc.gz", "f2.warc.gz"]));
+  const journal = new MemoryJournal();
+  let listed = -1;
+  const before = warcRequests().length;
+  const r = await find(input(), { journal, listing: (files: number) => { listed = files; } });
+  assert.equal(listed, 3);
+  assert.equal(warcRequests().length - before, 3, "f0 is requested once");
+  assert.deepEqual(r.candidates.map((c) => c.address).sort(), ["https://f0.example/source.json", "https://f1.example/source.json", "https://f2.example/source.json"]);
+  assert.equal(r.summary["files"], 3);
+  assert.deepEqual([...journal.entries.keys()].sort(), [0, 1, 2]);
+  assert.equal(journal.entries.get(2)!.file, `crawl-data/${SNAP}/segments/1.2/robotstxt/f2.warc.gz`);
+});
+
+test("a bad listing line is named by its line number in the listing, blank lines counted", async () => {
+  origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, gzipSync(Buffer.from(`crawl-data/${SNAP}/segments/1.2/robotstxt/a.warc.gz\n\n  \ncrawl-data/OTHER/x.warc.gz\n`)));
+  await assert.rejects(find(), (e: unknown) => e instanceof Error && e.message.startsWith("line 4 ") && e.message.includes("(26 characters)"));
 });
 
 test("a snapshot that is not a crawl name, a bad path listing, or one unreadable file fails the whole snapshot, and the message names no input text", async () => {
@@ -91,9 +124,14 @@ test("a snapshot that is not a crawl name, a bad path listing, or one unreadable
   await assert.rejects(find(), (e: unknown) => (e as { reason?: string }).reason === "status");
   origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, paths(["a.warc.gz", "bad.warc.gz"]));
   origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/bad.warc.gz`, new Uint8Array([1, 2, 3]));
+  const badRequests = () => warcRequests().filter((p) => p.endsWith("/bad.warc.gz")).length;
+  let before = badRequests();
   await assert.rejects(find(), Error, "not gzip");
+  assert.equal(badRequests() - before, 1, "a file that is not gzip is not read again");
   const cut = warcGz(SAMPLE_CAPTURES); origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/bad.warc.gz`, cut.subarray(0, cut.length - 30));
+  before = badRequests();
   await assert.rejects(find(), Error, "a truncated member");
+  assert.equal(badRequests() - before, 1, "a truncated member is not read again");
   origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, gzipSync(Buffer.alloc(80 * 1024 * 1024)));
   await assert.rejects(find(), (e: unknown) => e instanceof Error && (e as { code?: string }).code === "ERR_BUFFER_TOO_LARGE", "a listing that inflates past 64 MB");
   origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, gzipSync(Buffer.from("\n")));
@@ -120,6 +158,38 @@ test("a file whose body breaks off is read again from the start; the snapshot fa
   origin.behave = breakOff(100);
   try {
     await assert.rejects(find(), (e: unknown) => (e as { reason?: string }).reason === "unreachable");
+  } finally { origin.behave = null; }
+});
+
+test("a file whose host never answers is requested only as often as the input retries it, not again per file retry", async () => {
+  origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, paths(["dead.warc.gz"]));
+  origin.behave = (req) => { if (req.url?.endsWith("/dead.warc.gz")) { req.socket.destroy(); return true; } return false; };
+  try {
+    const before = warcRequests().length;
+    await assert.rejects(find(), (e: unknown) => (e as { reason?: string }).reason === "unreachable");
+    assert.equal(warcRequests().length - before, 9, "the input's own nine attempts, once");
+  } finally { origin.behave = null; }
+});
+
+test("a file pausing before it is read again is not requested once another file has failed", async () => {
+  many(2);
+  const f0 = warcGz([{ uri: "http://f0.example/robots.txt", status: 200, body: "Mad-Source: https://f0.example/source.json\n" }]);
+  let held: import("node:http").ServerResponse | null = null;
+  origin.behave = (req, res) => {
+    if (req.url?.endsWith("/f0.warc.gz")) { res.writeHead(200); res.write(Buffer.from(f0.subarray(0, Math.floor(f0.length / 2)))); setTimeout(() => res.destroy(), 10); return true; }
+    if (req.url?.endsWith("/f1.warc.gz")) { held = res; return true; }
+    return false;
+  };
+  // The pause before f0 is read again: f1's 404 is answered only now, and the pause lasts until its failure has been seen.
+  const sleep = async (): Promise<void> => {
+    while (held === null) await new Promise((r) => setTimeout(r, 5));
+    held.statusCode = 404; held.end();
+    await new Promise((r) => setTimeout(r, 200));
+  };
+  try {
+    const before = warcRequests().filter((p) => p.endsWith("/f0.warc.gz")).length;
+    await assert.rejects(find(new Input(bases, { test: true, sleep })), (e: unknown) => (e as { reason?: string }).reason === "status");
+    assert.equal(warcRequests().filter((p) => p.endsWith("/f0.warc.gz")).length - before, 1, "f0 is not requested again after f1 failed");
   } finally { origin.behave = null; }
 });
 
@@ -185,4 +255,28 @@ test("FolderJournal keeps one entry per finished file, written whole; a damaged 
   assert.deepEqual(candidateFileBytes(again), clean);
   second.remove();
   assert.equal(existsSync(folder), false);
+});
+
+test("FolderJournal refuses an entry whose counts disagree, whose offset is negative, whose place names another file, or whose robots is not printable ASCII", async () => {
+  many(6);
+  const folder = join(mkdtempSync(join(tmpdir(), "journal-")), `${SNAP}.progress`);
+  const clean = candidateFileBytes(await find(input(), { journal: new FolderJournal(folder, { test: true }) }));
+  type Entry = { candidates: { place: Record<string, string | number> }[]; counts: Record<string, number> };
+  const damage = (n: number, change: (e: Entry) => void): void => {
+    const e = JSON.parse(readFileSync(join(folder, `${n}.json`), "utf8")) as Entry;
+    change(e);
+    writeFileSync(join(folder, `${n}.json`), JSON.stringify(e));
+  };
+  damage(0, (e) => { e.counts["notAddresses"] = 1; });                              // lines != candidates + notAddresses + skipped
+  damage(1, (e) => { e.candidates[0]!.place["offset"] = -1; });
+  damage(2, (e) => { e.candidates[0]!.place["file"] = `crawl-data/${SNAP}/segments/1.2/robotstxt/f3.warc.gz`; });
+  damage(3, (e) => { e.candidates[0]!.place["robots"] = `http://f3.example/r${String.fromCharCode(0x85)}obots.txt`; });
+  damage(5, (e) => { e.candidates[0]!.place["robots"] = ""; });
+  const journal = new FolderJournal(folder, { test: true });
+  const before = warcRequests().length;
+  const again = await find(input(), { journal });
+  assert.deepEqual(warcRequests().slice(before).map((p) => p.slice(p.lastIndexOf("/") + 1)).sort(), ["f0.warc.gz", "f1.warc.gz", "f2.warc.gz", "f3.warc.gz", "f5.warc.gz"]);
+  assert.equal(journal.reused, 1);
+  assert.deepEqual(candidateFileBytes(again), clean);
+  journal.remove();
 });

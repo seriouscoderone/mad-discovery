@@ -9,7 +9,8 @@ import { saidOf, FILL } from "../src/said.ts";
 import { Session } from "../src/session.ts";
 import { Robots } from "../src/robots.ts";
 import { CATALOG, ROW, CONTAINED, PATH_LIMITS, PUBLICATION, type Limits, type RowLimits } from "../src/limits.ts";
-import { buildCatalog, readCandidateFile, toolCommit, type CandidateFile, type Row } from "../src/catalog.ts";
+import { buildCatalog, readCandidateFile, toolCommit, type Row } from "../src/catalog.ts";
+import type { CandidateFile } from "../src/finders/candidates.ts";
 import { SEEDED_NOTE } from "../src/catalogpages.ts";
 import { Origin } from "./helpers/servers.ts";
 
