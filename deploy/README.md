@@ -41,27 +41,43 @@ The second deployed source, since 2026-11-10: one gym-bp definition, `ECru8k3Cer
 
 ## The header for browser wallets
 
-Ruling 11: a source that wants browser wallets to read it sends `Access-Control-Allow-Origin: *` on `source.json` and on `definitions/*`. Both distributions above, `E3PDWZWR269C2D` (`mad.seriouscoder.one`) and `E8LQQKF16X4MY` (`mad.josephleehunsaker.com`), get it from CloudFront's managed response headers policy "SimpleCORS" (ID `60669652-455b-4ae9-85a4-c4c02393f86c`), which adds `Access-Control-Allow-Origin: *` to responses for simple CORS requests. It is attached to the cache behavior; nothing in the buckets changes.
+Ruling 11: a source that wants browser wallets to read it sends `Access-Control-Allow-Origin: *` on every answer for `source.json` and `definitions/*`, whatever headers the request carries. Both distributions above, `E3PDWZWR269C2D` (`mad.seriouscoder.one`) and `E8LQQKF16X4MY` (`mad.josephleehunsaker.com`), get it from the response headers policy `mad-source-any-origin` (ID `628a06e9-6f5b-4910-885c-c8fbf64853ea`) in the maintainer's account, attached to the default cache behavior; nothing in the buckets changes. Its CORS configuration allows every origin (`*`), every request header (`*`), the methods `GET`, `HEAD` and `OPTIONS`, no credentials, and overrides any such header from the origin. Response headers policies cost nothing.
 
-**Applied on 2026-11-12**, with the maintainer's go-ahead, by the CLI steps below on both distributions (each had only its default behavior and no response headers policy before). Checked afterwards: `verify` over `definitions/ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1.json` on each host reports that browser wallets can read the file; `source.json` on each host carries `access-control-allow-origin: *` when asked with an `Origin` header and no such header without one, as SimpleCORS specifies.
+**Why not the managed SimpleCORS policy**, which these distributions used from 2026-11-12 to 2026-11-13: it allows no request headers, so CloudFront leaves the header out when the request carries one that is not on the browser's safelist, such as `Cache-Control` or `Pragma`. A wallet fetches with the cache mode `no-store`, for which the browser itself adds `Cache-Control: no-cache` and `Pragma: no-cache`, so no wallet could read either source (GitHub #5, found from the maintainer's phone). The managed CORS-With-Preflight policy allows no request headers either. CloudFront refuses `Access-Control-Allow-Origin` as a custom header, so the header has to come from a CORS configuration.
 
-In the console the same change is: Distributions, the distribution, Behaviors, select the behavior, Edit, "Response headers policy", SimpleCORS, Save changes.
+**Applied** to `E3PDWZWR269C2D` and `E8LQQKF16X4MY` on 2026-11-13, with the maintainer's go-ahead. Checked afterwards on both hosts, for `source.json`, a definition, a page and a missing file: a request with `Origin` gets `access-control-allow-origin: *` whether it also carries `Cache-Control: no-cache` and `Pragma: no-cache`, `Cache-Control: max-age=0` or `Cache-Control: no-store`; a request without `Origin` gets no such header; a preflight (`OPTIONS`) is refused with 403 because the distributions allow only `GET` and `HEAD`, which no wallet needs, since its `no-store` fetch sends no preflight.
 
-With the CLI, for each distribution id (`AWS_PROFILE=personal`):
+The policy, as created (`AWS_PROFILE=personal`):
 
 ```bash
-aws cloudfront get-distribution-config --id <id> --output yaml > dist-config.yaml
-# In the cache behavior, add:  ResponseHeadersPolicyId: 60669652-455b-4ae9-85a4-c4c02393f86c
-# Rename the ETag field to IfMatch.
-aws cloudfront update-distribution --id <id> --cli-input-yaml file://dist-config.yaml
+aws cloudfront create-response-headers-policy --response-headers-policy-config '{
+  "Name": "mad-source-any-origin",
+  "Comment": "ACAO * for any GET or HEAD whatever its request headers (mad-discovery Ruling 11, GitHub #5)",
+  "CorsConfig": {
+    "AccessControlAllowOrigins": { "Quantity": 1, "Items": ["*"] },
+    "AccessControlAllowHeaders": { "Quantity": 1, "Items": ["*"] },
+    "AccessControlAllowMethods": { "Quantity": 3, "Items": ["GET", "HEAD", "OPTIONS"] },
+    "AccessControlAllowCredentials": false,
+    "OriginOverride": true
+  }
+}'
 ```
 
-Steps checked against the AWS CloudFront Developer Guide on 2026-11-12. Afterwards `verify` over a definition's address reports that browser wallets can read the file: it asks with an `Origin` header, as a browser does, and SimpleCORS adds the header only to such a request, so a plain `curl -I` without one does not show it.
+To attach it to a distribution, put its ID in the default cache behavior's `ResponseHeadersPolicyId` and update the distribution with the configuration's ETag:
 
-The check for the source document itself exits 0 when the document reads as a source, and reports `browserWallets` either way:
+```bash
+aws cloudfront get-distribution-config --id <id> --output json > dist.json
+jq '.DistributionConfig | .DefaultCacheBehavior.ResponseHeadersPolicyId = "628a06e9-6f5b-4910-885c-c8fbf64853ea"' dist.json > cfg.json
+aws cloudfront update-distribution --id <id> --if-match "$(jq -r .ETag dist.json)" --distribution-config file://cfg.json
+```
+
+In the console the same change is: Distributions, the distribution, Behaviors, select the behavior, Edit, "Response headers policy", `mad-source-any-origin`, Save changes.
+
+`verify` asks the way a wallet does, with `Origin`, `Cache-Control: no-cache` and `Pragma: no-cache`, and reports `browserWallets`; a plain `curl -I` without `Origin` shows no such header. The check, for the source document and for a definition:
 
 ```bash
 node bin/mad-discovery.ts verify https://mad.seriouscoder.one/source.json
+node bin/mad-discovery.ts verify https://mad.seriouscoder.one/definitions/ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1.json ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1
 ```
 
 ## The robots.txt lines
