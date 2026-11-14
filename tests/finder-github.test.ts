@@ -7,10 +7,11 @@ import { githubFinder, PAUSE_MS } from "../src/finders/github.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const origin = await Origin.start();
-after(() => origin.close());
+const made: Input[] = [];
+after(async () => { for (const i of made) i.close(); await origin.close(); });
 const bases = { archive: `${origin.origin}/archive/`, index: `${origin.origin}/index/`, github: `${origin.origin}/github/` };
 const slept: number[] = [];
-const input = () => new Input(bases, { test: true, sleep: async (ms) => { slept.push(ms); } });
+const input = () => { const i = new Input(bases, { test: true, sleep: async (ms) => { slept.push(ms); } }); made.push(i); return i; };
 const sample = readFileSync(fileURLToPath(new URL("../fixtures/github/search-sample.json", import.meta.url)), "utf8");
 const page = (items: unknown[], total = items.length, incomplete = false) => JSON.stringify({ total_count: total, incomplete_results: incomplete, items });
 const item = (n: number) => ({ full_name: `u/r${n}`, homepage: `https://r${n}.example/source.json`, topics: ["mad-source"] });

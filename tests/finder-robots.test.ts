@@ -4,7 +4,8 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Input } from "../src/finders/input.ts";
+import { fileURLToPath } from "node:url";
+import { Input, type InputOptions } from "../src/finders/input.ts";
 import { listCrawls, robotsFinder, type RobotsHooks } from "../src/finders/robots.ts";
 import { candidateFileBytes, type Journal, type RobotsRecord } from "../src/finders/candidates.ts";
 import { FolderJournal } from "../src/finders/journal.ts";
@@ -12,9 +13,11 @@ import { warcGz, SAMPLE_CAPTURES } from "./helpers/warc.ts";
 import { Origin } from "./helpers/servers.ts";
 
 const origin = await Origin.start();
-after(() => origin.close());
+const made: Input[] = [];
+after(async () => { for (const i of made) i.close(); await origin.close(); });
 const bases = { archive: `${origin.origin}/archive/`, index: `${origin.origin}/index/`, github: `${origin.origin}/github/` };
-const input = () => new Input(bases, { test: true, sleep: async () => {} });
+const input = (more: InputOptions = {}) => { const i = new Input(bases, { test: true, sleep: async () => {}, ...more }); made.push(i); return i; };
+const SAMPLE = readFileSync(fileURLToPath(new URL("../fixtures/robotstxt/sample.warc.gz", import.meta.url)));
 const SNAP = "CC-MAIN-2026-43";
 const paths = (names: string[]) => gzipSync(Buffer.from(names.map((n) => `crawl-data/${SNAP}/segments/1.2/robotstxt/${n}`).join("\n") + "\n"));
 const find = (i = input(), hooks: RobotsHooks = {}) => robotsFinder(SNAP, i, { test: true }, hooks);
@@ -43,7 +46,7 @@ test("listCrawls reads collinfo.json and gives the crawl ids newest first, whate
 
 test("the robots finder reads every file of a crawl and takes the first Mad-Source line of each 200 response that is a source address, with its place", async () => {
   origin.put(`archive/crawl-data/${SNAP}/robotstxt.paths.gz`, paths(["a.warc.gz", "b.warc.gz"]));
-  origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/a.warc.gz`, warcGz(SAMPLE_CAPTURES));
+  origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/a.warc.gz`, SAMPLE);   // the committed bytes, through the finder
   origin.put(`archive/crawl-data/${SNAP}/segments/1.2/robotstxt/b.warc.gz`, warcGz([{ uri: "http://eta.example/robots.txt", status: 200, body: "Mad-Source: https://eta.example/source.json\n" }]));
   const seen: [number, number][] = [];
   let listed: number | null = null, warcBeforeListing = -1;
@@ -151,7 +154,7 @@ test("a file whose body breaks off is read again from the start; the snapshot fa
   try {
     const before = warcRequests().filter((p) => p.endsWith("/f3.warc.gz")).length;
     const slept: number[] = [];
-    const r = await find(new Input(bases, { test: true, pause: 7, sleep: async (ms) => { slept.push(ms); } }));
+    const r = await find(input({ pause: 7, sleep: async (ms) => { slept.push(ms); } }));
     assert.equal(r.candidates.length, 20);
     assert.equal(warcRequests().filter((p) => p.endsWith("/f3.warc.gz")).length - before, 2, "read twice: broken, then whole");
     assert.deepEqual(slept, [7], "the input's backoff, from its pause option");
@@ -198,15 +201,22 @@ test("a file pausing before it is read again is not requested once another file 
     if (req.url?.endsWith("/f1.warc.gz")) { held = res; return true; }
     return false;
   };
-  // The pause before f0 is read again: f1's 404 is answered only now, and the pause lasts until its failure has been seen.
+  // The pause before f0 is read again: f1's 404 is answered only now, and the pause lasts until f1's request has failed. The finder
+  // records a failure in the same turn as the rejection, so by the next poll it has been seen. Polled every 5 ms, at most 5 s.
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  let f1Failed = false;
   const sleep = async (): Promise<void> => {
-    while (held === null) await new Promise((r) => setTimeout(r, 5));
+    while (held === null) await tick();
     held.statusCode = 404; held.end();
-    await new Promise((r) => setTimeout(r, 200));
+    for (let k = 0; !f1Failed && k < 1000; k++) await tick();
   };
+  const i = input({ sleep });
+  const open = i.open.bind(i);
+  i.open = (url, headers) => { const p = open(url, headers); if (url.endsWith("/f1.warc.gz")) p.catch(() => { f1Failed = true; }); return p; };
   try {
     const before = warcRequests().filter((p) => p.endsWith("/f0.warc.gz")).length;
-    await assert.rejects(find(new Input(bases, { test: true, sleep })), (e: unknown) => (e as { reason?: string }).reason === "status");
+    await assert.rejects(find(i), (e: unknown) => (e as { reason?: string }).reason === "status");
+    assert.ok(f1Failed, "the pause ended on f1's failure, not on the bound");
     assert.equal(warcRequests().filter((p) => p.endsWith("/f0.warc.gz")).length - before, 1, "f0 is not requested again after f1 failed");
   } finally { origin.behave = null; }
 });
