@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, existsSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { readFileSync, mkdirSync, statSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { isSaid, checkSaid, saidOf, replaceAll, FILL } from "./said.ts";
 import { parseConfig, ConfigError } from "./config.ts";
@@ -245,15 +245,14 @@ async function catalog(args: string[], io: Io, options: RunOptions): Promise<num
   return 0;
 }
 
-const SNAPSHOT_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/;   // a snapshot name becomes a file name (the build's rule for a candidate file)
-
 async function find(args: string[], io: Io, options: RunOptions): Promise<number> {
   const finder = flag(args, "--finder");
   const out = flag(args, "--out");
   const named = flags(args, "--snapshot");
   if ((finder !== "robots" && finder !== "github") || out === undefined) return usage(io, "catalog find needs --finder robots or github, and --out.");
   if (finder === "github" && named.length > 0) return usage(io, "the GitHub finder has no snapshots: its file is named by the day it runs.");
-  for (const s of named) if (!CRAWL.test(s) || !SNAPSHOT_NAME.test(s)) return usage(io, `not a crawl name: ${s.length > 64 ? s.slice(0, 64) : s}`);
+  if (args.filter((a) => a === "--snapshot").length !== named.length) return usage(io, "--snapshot needs a crawl name.");
+  for (const s of named) if (!CRAWL.test(s)) return usage(io, `not a crawl name: ${s.length > 64 ? s.slice(0, 64) : s}`);
   const { archive, index, github } = options.finderInputs ?? PUBLIC_INPUTS;
   const input = new Input({ archive, index, github }, { test: options.finderInputs !== undefined, pause: options.finderInputs?.pause });
   try {
@@ -270,7 +269,10 @@ async function find(args: string[], io: Io, options: RunOptions): Promise<number
     const resumed: Record<string, number> = {};
     for (const snapshot of snapshots) {
       const path = join(folder, `${snapshot}.json`);
-      if (existsSync(path)) {   // the output folder is the one thing kept between runs
+      let existing: "file" | "other" | "none" = "none";
+      try { existing = statSync(path).isFile() ? "file" : "other"; } catch { /* absent */ }
+      if (existing === "other") { failed.push({ snapshot, reason: "the candidate file path is not a file" }); continue; }
+      if (existing === "file") {   // the output folder is the one thing kept between runs
         kept.push(snapshot);
         if (finder === "robots") {   // a run killed after its rename
           try { rmSync(join(folder, `${snapshot}.progress`), { recursive: true, force: true }); } catch { io.err(`${snapshot}: the journal folder could not be removed\n`); }

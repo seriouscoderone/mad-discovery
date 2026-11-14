@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, cpSync, readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -542,10 +542,26 @@ test("catalog find writes one candidate file per snapshot, keeps files already t
     assert.equal(cc.requests.slice(requests).filter((p) => !p.startsWith("index/")).length, 0);
     // Usage.
     const usageBefore = cc.requests.length;
-    for (const args of [["catalog", "find"], ["catalog", "find", "--finder", "bing", "--out", out2], ["catalog", "find", "--finder", "robots"], ["catalog", "find", "--finder", "github", "--out", out2, "--snapshot", "2026-11-12"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot", "../x"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot", "CC-MAIN-2026-43", "--snapshot", "x"]]) {
+    for (const args of [["catalog", "find"], ["catalog", "find", "--finder", "bing", "--out", out2], ["catalog", "find", "--finder", "robots"], ["catalog", "find", "--finder", "github", "--out", out2, "--snapshot", "2026-11-12"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot", "../x"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot", "CC-MAIN-2026-43", "--snapshot", "x"], ["catalog", "find", "--finder", "robots", "--out", out2, "--snapshot"], ["catalog", "find", "--finder", "robots", "--snapshot", "--out", out2]]) {
       c = capture();
       assert.equal(await main(args, c.io, opts), 2, args.join(" ")); assert.equal(c.out(), "");
     }
     assert.equal(cc.requests.length, usageBefore, "usage errors fetch nothing");
+  } finally { cc.behave = null; await cc.close(); }
+});
+
+test("catalog find treats a directory where a candidate file belongs as a failure, not as a kept file", async () => {
+  const cc = await Origin.start();
+  try {
+    const opts = { ...local, finderInputs: { archive: `${cc.origin}/archive/`, index: `${cc.origin}/index/`, github: `${cc.origin}/github/`, pause: 0, today: "2026-11-12" } };
+    cc.behave = (req, res) => { if (req.url?.startsWith("/github/search/repositories")) { res.setHeader("content-type", "application/json"); res.end(readFileSync(join(fixtures, "github", "search-sample.json"))); return true; } return false; };
+    const out = join(mkdtempSync(join(tmpdir(), "find-")), "c");
+    mkdirSync(join(out, "github", "2026-11-12.json"), { recursive: true });
+    const c = capture();
+    assert.equal(await main(["catalog", "find", "--finder", "github", "--out", out], c.io, opts), 1);
+    const r = c.json();
+    assert.deepEqual(r.kept, []); assert.deepEqual(r.written, []);
+    assert.deepEqual(r.failed, [{ snapshot: "2026-11-12", reason: "the candidate file path is not a file" }]);
+    assert.equal(cc.requests.length, 0, "nothing is fetched for it");
   } finally { cc.behave = null; await cc.close(); }
 });
