@@ -1,5 +1,8 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { Input, InputError, PUBLIC_INPUTS } from "../src/finders/input.ts";
 import { Origin } from "./helpers/servers.ts";
 
@@ -156,4 +159,36 @@ test("at most the configured connections to a host are open at once", async () =
     assert.equal(peak, 3);
     i.close();
   } finally { origin.behave = null; }
+});
+
+test("an https input connects only to the address its name was checked to, and a certificate no authority signed is unreachable", async () => {
+  const secure = await Origin.start(true);
+  const resolved: number[] = [];   // at each connection the server sees, how many lookups had been made
+  const calls: string[] = [];
+  secure.server.on("connection", () => resolved.push(calls.length));
+  try {
+    secure.put("archive/x", "ok");
+    const port = new URL(secure.origin).port;
+    const far = { archive: `https://archive.test:${port}/archive/`, index: `https://index.test:${port}/`, github: `https://github.test:${port}/` };
+    const i = new Input(far, { test: true, sleep: async () => {}, resolve: async (h) => { calls.push(h); return ["127.0.0.1"]; } });
+    // archive.test resolves nowhere: only the injected answer can have brought these connections to the local origin.
+    await assert.rejects(i.open(`https://archive.test:${port}/archive/x`), reason("unreachable"), "self-signed: refused, then retried");
+    i.close();
+    assert.ok(calls.length > 0 && calls.every((h) => h === "archive.test"), "the name was resolved through the injected resolver");
+    assert.deepEqual(resolved, calls.map((_, k) => k + 1), "each try resolved the name once and then connected once, to the checked address");
+    assert.equal(secure.requests.length, 0, "no request was sent over a connection whose certificate failed");
+  } finally { await secure.close(); }
+});
+
+test("an https input verifies the certificate even with NODE_TLS_REJECT_UNAUTHORIZED=0 in the environment", async () => {
+  const secure = await Origin.start(true);
+  try {
+    secure.put("x", "ok");
+    const address = `${secure.origin}/x`;
+    const child = fileURLToPath(new URL("./helpers/fetch-child.ts", import.meta.url));
+    const env = { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: "0" };
+    const run = async (mode: string) => JSON.parse((await promisify(execFile)(process.execPath, [child, mode, address], { env })).stdout) as { outcome: string };
+    assert.equal((await run("lax")).outcome, "ok", "the control: with the option left to its default, the variable turns the check off");
+    assert.equal((await run("input")).outcome, "unreachable", "the input's explicit rejectUnauthorized: true wins over the variable");
+  } finally { await secure.close(); }
 });
